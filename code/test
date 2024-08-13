@@ -1,0 +1,40 @@
+import pymysql
+import pymysql.cursors
+
+
+#connect
+co = pymysql.connect(host="localhost", user = "root", password="1234", charset="utf8", db = "mysql")
+
+cursor = co.cursor()
+
+cursor.execute("SELECT * FROM sys.reall")
+a = cursor.fetchall()
+    
+
+# 사용자로부터 정보 입력받기
+major = input("전공을 입력하세요 :")
+grade = input("학년을 입력하세요 :")
+ex = input("선호시간대를 입력하세요(,로 구분해주세요)) :")
+
+ex1 = [item.strip() for item in ex.split(',')]
+print(ex1)
+
+
+# 삭제 작업 수행
+for time in ex1:
+    delete_query = "DELETE FROM sys.reall WHERE 시간표 != %s"
+    cursor.execute(delete_query, (time,))
+    print(f"Deleted records not matching schedule: {time}")
+
+# 삭제 후 남아있는 레코드 확인
+cursor.execute("SELECT * FROM sys.reall")
+remaining_records = cursor.fetchall()
+print("Remaining records after delete attempt:")
+for record in remaining_records:
+    print(record)
+
+# commit()을 호출하지 않으면 변경사항이 자동으로 롤백됩니다.
+# co.commit()  # 이 줄을 주석 처리하면 트랜잭션이 롤백됩니다.
+
+# 연결 종료
+co.close()
