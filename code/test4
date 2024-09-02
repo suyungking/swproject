@@ -1,0 +1,103 @@
+import pymysql
+import pymysql.cursors
+import pandas as pd
+import sys
+import io
+
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+#connect
+co = pymysql.connect(host="localhost", user = "root", password="1234", charset="utf8", db = "mysql")
+
+cursor = co.cursor()
+
+cursor.execute("SELECT * FROM sys.reall")
+a = cursor.fetchall()
+    
+timetable= []
+c= ['월','화','수','목','금']
+d=[]
+h = False
+# 사용자로부터 정보 입력받기
+major = input("전공을 입력하세요(ex: 소프트웨어융합전공) :")
+grade = input("학년을 입력하세요(ex: 4학년) :")
+score = int(input("학점을 입력하세요(ex: 18)"))
+er = input("선호하는 요일을 입력하세요(ex: 월,화): ")
+er1 = [ item.strip() for item in er.split(',')]
+
+print(major)
+print(grade)
+print(er1)
+# 전공 넣는거 
+for i in range(len(a)):
+    if major == a[i][1] and grade == a[i][2]:
+        timetable.append(a[i])
+
+
+print(timetable)
+
+# 선호하지 않는 요일 빼는거
+d = set(c) - set(er1) 
+print(d)
+
+
+
+# 중복된 과목을 찾기 위한 맵 생성
+course_map = {}
+for i, entry in enumerate(timetable):
+    course_name = entry[5]
+    if course_name in course_map:
+        course_map[course_name].append(i)
+    else:
+        course_map[course_name] = [i]
+
+# 중복된 항목에 대해 사용자가 삭제할 항목을 선택하도록 함
+major_timetable = timetable[:]
+for course_name, indices in course_map.items():
+    if len(indices) > 1:
+        print(f"\n중복된 과목: {course_name}")
+        for idx, actual_index in enumerate(indices):
+            print(f"{idx + 1}. {timetable[actual_index]}")
+
+        # 사용자가 삭제할 항목을 선택
+        choice = int(input(f"\n삭제할 항목의 번호를 선택하세요 (1-{len(indices)}): ")) - 1
+
+        # 선택한 항목을 삭제
+        major_timetable.pop(indices[choice])
+
+# 최종 시간표 출력
+print("\n전공 시간표:")
+for item in major_timetable:
+    print(item)
+
+
+
+# 선호하지 않는 요일이 있다고 판별하는것 
+for i in range(len(timetable)):
+    q = timetable[i][14]
+    for b1 in q:
+        
+        if b1 in d:
+            h = True
+            break
+
+if h:
+    print("선호하지 않은 요일이 있습니다. 요일에 포함 시키겠습니까 아니면 전공만 넣겠습니까?")
+    answer = int(input("넣으실거면 1 전공만 넣으실거면 2를 눌러주세요 : "))
+    if answer == 1 : 
+        er1 = er1 + list(d)
+    else : 
+        h = False
+else:
+    print("양호")
+
+print(er1)
+
+# 전공 학점을 뺀 나머지 학점 구하기 
+for i in range(len(major_timetable)):
+    a = major_timetable[i][12]
+
+    score -= a
+print("전공을 뺀 남은 학점은 : ",score )
+ 
