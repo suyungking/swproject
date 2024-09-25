@@ -1,0 +1,198 @@
+import pymysql
+import pymysql.cursors
+import pandas as pd
+import sys
+import io
+
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+#connect
+co = pymysql.connect(host="localhost", user = "root", password="1234", charset="utf8", db = "mysql")
+
+cursor = co.cursor()
+
+cursor.execute("SELECT * FROM sys.making")
+cur = cursor.fetchall()
+    
+timetable= []
+weekly = ['월','화','수','목','금','토']
+reweekly=[]
+h = False
+# 사용자로부터 정보 입력받기
+major = input("전공을 입력하세요(ex: 소프트웨어융합전공) :")
+shift = input("주간/야간을 입력하세요(ex: 주간) : ")
+grade = input("학년을 입력하세요(ex: 4학년) :")
+score = int(input("학점을 입력하세요(ex: 18) : "))
+choice_weekly = list(input("선호하는 요일을 입력하세요(ex: 월,화): ").split(","))
+ 
+print(major)
+print(grade)
+print(choice_weekly)
+
+# 전공 넣는거 
+for i in range(len(cur)):
+    if major == cur[i][2] and grade == cur[i][3]:
+        timetable.append(cur[i])
+print(timetable)
+
+# 선호하지 않는 요일
+reweekly = set(weekly) - set(choice_weekly) 
+print(reweekly)
+
+# 중복된 과목을 찾기 위한 맵 생성
+course_map = {}
+for i, entry in enumerate(timetable):
+    course_name = entry[7]
+    if course_name in course_map:
+        course_map[course_name].append(i)
+    else:
+        course_map[course_name] = [i]
+
+# 중복된 항목에 대해 사용자가 삭제할 항목을 선택하도록 함
+major_timetable = timetable[:]
+for course_name, indices in course_map.items():
+    if len(indices) > 1:
+        print(f"\n중복된 과목: {course_name}")
+        for idx, actual_index in enumerate(indices):
+            print(f"{idx + 1}. {timetable[actual_index]}")
+
+        # 사용자가 삭제할 항목을 선택
+        choice = int(input(f"\n삭제할 항목의 번호를 선택하세요 (1-{len(indices)}): ")) - 1
+
+        # 선택한 항목을 삭제
+        major_timetable.pop(indices[choice])
+
+
+# 주/야 둘중에 하나  항목 삭제
+for i in range(len(major_timetable) - 1, -1, -1):  # 역순으로 리스트 순회
+    q = major_timetable[i][4]  # 요일 리스트
+    # q가 야간이면 삭제
+    if '야간' in q:
+        major_timetable.pop(i)  # 해당 항목 삭제
+
+
+# 최종 시간표 출력
+print("\n전공 시간표:")
+for item in major_timetable:
+    print(item)
+
+
+# 선호하지 않는 요일이 있다고 판별하는것 
+for i in range(len(timetable)):
+    q = timetable[i][23]
+    for q1 in q:
+        if q1 in reweekly:
+            h = True
+            break
+
+if h:
+    print("선호하지 않은 요일이 있습니다. 요일에 포함 시키겠습니까 아니면 전공만 넣겠습니까?")
+    answer = int(input("넣으실거면 1 전공만 넣으실거면 2를 눌러주세요 : "))
+    if answer == 1 :
+        print(reweekly)
+        answer2 = list(input("넣으실 요일을 입력하세요(ex: 금) : ").split(','))
+        choice_weekly += answer2
+    else : 
+        h = False
+else:
+    print("양호")
+
+print(choice_weekly)
+
+# 전공 학점을 뺀 나머지 학점 구하기 
+for i in range(len(major_timetable)):
+    a = major_timetable[i][17]
+
+    score -= a
+print("전공을 뺀 남은 학점은 : ",score )
+ 
+print("전공 시간표:")
+for item in major_timetable:
+    print(item)
+
+
+
+# 교양인것들만 리스트에 넣기 
+culture_imetable = [] 
+culture_imetable = [c for c in cur if c[1] == "브라이트칼리지"]
+print(len(culture_imetable))
+
+reweekly = set(weekly) - set(choice_weekly) 
+
+# (선호하지 않는 요일 삭제)역순으로 순회하면서 해당 요일이 포함된 항목 삭제
+for i in range(len(culture_imetable) - 1, -1, -1):  # 역순으로 리스트 순회
+    q = culture_imetable[i][23]  # 요일 리스트
+    # q 중 하나라도 reweekly에 포함되면 삭제
+    if any(day in reweekly for day in q):  
+        culture_imetable.pop(i)  # 해당 항목 삭제
+
+print(len(culture_imetable))
+
+# 주/야 둘중에 하나  항목 삭제
+for i in range(len(culture_imetable) - 1, -1, -1):  # 역순으로 리스트 순회
+    q = culture_imetable[i][4]  # 요일 리스트
+    # q가 야간이면 삭제
+    if '야간' in q:
+        culture_imetable.pop(i)  # 해당 항목 삭제
+
+print(len(culture_imetable))
+
+template = []
+for i in range(len(major_timetable)):
+    template.append(major_timetable[i][23])
+
+print(template)
+
+
+
+
+# 요일과 시간 범위를 추출하는 함수
+def extract_day_and_time(range_str):
+    ranges = range_str.split(' / ')
+    result = []
+    for r in ranges:
+        try:
+            day, time_range = r.split(' ')
+            day = day.strip('()')  # 괄호 제거
+            start_time, end_time = map(float, time_range.split('~'))
+            result.append((day, start_time, end_time))
+        except ValueError as e:
+            print(f"Error processing range '{r}': {e}")
+            continue  # 잘못된 범위는 무시하고 계속 진행
+    return result
+
+# 겹치지 않는 범위를 저장할 리스트
+non_overlapping_ranges = []
+
+# range2의 모든 항목에 대해 겹치지 않는 범위를 확인
+for entry in culture_imetable:
+    range2 = entry[23]
+
+    ranges2 = extract_day_and_time(range2)
+    overlap_found = False  # 겹침 여부 초기화
+
+    # range2의 각 범위 부분에 대해 겹침 확인
+    for range2_day, range2_start, range2_end in ranges2:
+        for range1 in template:
+            ranges1 = extract_day_and_time(range1)
+
+            # 각 범위에 대해 겹침 여부 확인
+            for range1_day, range1_start, range1_end in ranges1:
+                # 요일이 같고 시간이 겹치면 overlap_found를 True로 설정
+                if range1_day == range2_day and not (range1_end <= range2_start or range1_start >= range2_end):
+                    overlap_found = True
+                    break  # 겹침 발견 시 루프 중단
+            
+            if overlap_found:
+                break  # 범위가 겹치면 더 이상 확인할 필요 없음
+
+        if overlap_found:
+            break  # range2의 어떤 부분에서 겹치면 전체를 스킵
+
+    # 겹치지 않으면 non_overlapping_ranges에 추가
+    if not overlap_found:
+        non_overlapping_ranges.append(entry)
+
+# 최종 결과 출력
+print("겹치지 않는 range2 범위들:", non_overlapping_ranges)
