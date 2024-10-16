@@ -1,0 +1,695 @@
+import pymysql
+import pymysql.cursors
+import pandas as pd
+import sys
+import io
+import copy
+
+sys.stdin = io.TextIOWrapper(sys.stdin.buffer, encoding='utf-8')
+sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+
+#connect
+co = pymysql.connect(host="localhost", user = "root", password="1234", charset="utf8", db = "mysql") # 시간표
+ci = pymysql.connect(host="localhost", user = "root", password="1234", charset="utf8", db = "mysql") # 사용자 정보 
+cursor = co.cursor() # 24/2학기 시간표 
+cio = ci.cursor() #졸업요구학점표 
+
+
+cursor.execute("SELECT * FROM sys.making")
+cio.execute("SELECT * FROM sys.ntui")
+cur =cursor.fetchall()
+cio.fetchall()
+    
+
+h = False
+def get_int_input(prompt):
+    while True:
+        try:
+            return int(input(prompt))  # 입력을 정수로 변환하여 반환
+        except ValueError:
+            print("잘못된 입력입니다. 정수를 입력해 주세요.")
+
+def get_string_input(prompt):
+    while True:
+        try:
+            user_input = input(prompt)  # 입력을 문자열로 받음
+            if not user_input.strip():  # 입력이 빈 문자열이거나 공백으로만 구성된 경우
+                raise ValueError  # 예외 발생
+            return user_input  # 유효한 입력이면 반환
+        except ValueError:
+            print("잘못된 입력입니다. 빈 값을 입력할 수 없습니다. 다시 입력해 주세요.")
+
+
+
+
+# 과목을 추가하고 목표 학점에 도달했는지 확인하는 간단한 코드
+def add_subjects_until_credit_limit(all_subjects, an_score , score,fina_subjects):
+      # 누적 학점
+    
+
+    for subject in all_subjects:
+        subject_credits = subject[17]  # 학점이 있는 인덱스(17번째)
+
+        # 학점을 더하면 목표 학점을 초과하는지 확인
+        if an_score + subject_credits  > score:
+            print(f"학점 한도 {an_score}학점에 도달했습니다. 더 이상 추가할 수 없습니다.")
+            break
+        
+        fina_subjects.append(subject)  # 과목 추가
+        an_score += subject_credits  # 학점 누적
+        print(f"현재 선택한 과목의 학점: {an_score}학점")
+
+        
+    return an_score
+        
+
+
+# 요일과 시간 범위를 추출하는 함수
+def extract_day_and_time(range_str):
+    ranges = range_str.split(' / ')
+    result = []
+    for r in ranges:
+        try:
+            day, time_range = r.split(' ')
+            day = day.strip('()')  # 괄호 제거
+            start_time, end_time = map(float, time_range.split('~'))
+            result.append((day, start_time, end_time))
+        except ValueError as e:
+            print(f"Error processing range '{r}': {e}")
+            continue  # 잘못된 범위는 무시하고 계속 진행
+    return result
+
+
+
+
+    # 겹치지 않는 범위를 저장할 리스트
+def check(culture_imetable,major_timetable):
+    template = []
+    for i in range(len(major_timetable)):
+        template.append(major_timetable[i][23])
+
+
+    non_subjects = []
+
+    # range2의 모든 항목에 대해 겹치지 않는 범위를 확인
+    for entry in culture_imetable:
+        range2 = entry[23]
+
+        ranges2 = extract_day_and_time(range2)
+        overlap_found = False  # 겹침 여부 초기화
+
+        # range2의 각 범위 부분에 대해 겹침 확인
+        for range2_day, range2_start, range2_end in ranges2:
+            for range1 in template:
+                ranges1 = extract_day_and_time(range1)
+
+                # 각 범위에 대해 겹침 여부 확인
+                for range1_day, range1_start, range1_end in ranges1:
+                    # 요일이 같고 시간이 겹치면 overlap_found를 True로 설정
+                    if range1_day == range2_day and not (range1_end <= range2_start or range1_start >= range2_end):
+                        overlap_found = True
+                        break  # 겹침 발견 시 루프 중단
+                
+                if overlap_found:
+                    break  # 범위가 겹치면 더 이상 확인할 필요 없음
+
+            if overlap_found:
+                break  # range2의 어떤 부분에서 겹치면 전체를 스킵
+
+        # 겹치지 않으면 non_overlapping_ranges에 추가
+        if not overlap_found:
+            non_subjects.append(entry)
+
+    return non_subjects
+
+def select_time_slot(course_name, timetable,time_sub):
+    
+    # 선택된 과목에 대한 시간대 목록 추출
+    selected_cou = [course for course in timetable if course[7] == course_name]
+    
+    # 과목이 없는 경우 처리
+    if not selected_cou:
+        print(f"'{course_name}' 과목이 전처리된 시간표에 없습니다.")
+        return
+    
+    # 시간대 추출
+    times = [course[23] for course in selected_cou]
+    
+    # 시간대가 하나인 경우
+    if len(times) == 1:
+        print(f"'{course_name}' 과목은 하나의 시간대에만 개설되어 있습니다: {times[0]}")
+        time_sub.append(selected_cou[0])  # 과목과 시간대 쌍 추가
+    # 시간대가 여러 개인 경우
+    else:
+        print(f"'{course_name}' 과목은 여러 시간대에 개설되어 있습니다.")
+        # 시간대 리스트 보여주기
+        for i, time in enumerate(selected_cou):
+            print(f"{i + 1}. (과목: {course_name}) {time} ")
+        
+        # 사용자에게 선호하는 시간대 선택 받기
+        choice = int(input("선호하는 시간대의 번호를 선택하세요: "))
+        if 1 <= choice <= len(times):
+            selected_course = selected_cou[choice - 1]
+            time_sub.append(selected_course)  # 과목과 선택한 시간대 쌍 추가
+            print(f"과목: {course_name} 선택된 시간대: {selected_course[23]} ")
+        else:
+            print("잘못된 선택입니다.")
+    return time_sub
+
+def count_matching_subjects(re_sub, non_subjects):
+    com_li = []
+    
+    # 각 re_sub 요소와 non_subjects 리스트에서 일치하는 항목을 카운트
+    for subject in re_sub:
+        count = 0
+        for item in non_subjects:
+            if subject == item[7]:  # 과목명을 비교하는 부분
+                count += 1
+        com_li.append(count)
+
+    # re_sub와 com_li를 튜플로 묶어 정렬
+    combin = list(zip(re_sub, com_li))
+    sorted_combined = sorted(combin, key=lambda x: x[1])
+    
+    # 정렬된 과목 리스트만 추출
+    sorted_subjects = [subject for subject, _ in sorted_combined]
+    
+    return sorted_subjects
+
+
+name = get_string_input("이름을 입력하세요 : ")
+major = get_string_input("전공을 입력하세요(ex: 소프트웨어융합전공) :")
+shift = get_string_input("주간/야간을 입력하세요(ex: 주간) : ")
+number = get_int_input("학번을 입력하세요(ex:19) : ")
+grade = get_string_input("학년을 입력하세요(ex: 4학년) :")
+score = get_int_input("요번 학기에 들을 학점을 입력하세요(ex: 18) : ")
+choice_weekly = get_string_input("선호하는 요일을 입력하세요(ex: 월,화): ").split(",")
+
+an_score = 0
+fina_subjects = []
+timetable= []
+weekly = ['월','화','수','목','금','토']
+reweekly=[]
+    # 사용자로부터 정보 입력받기
+while True  :
+    
+            # SQL 쿼리 작성 (파라미터화된 쿼리 사용)
+    if major == "소프트웨어융합전공":
+        if number <= 19:
+            script = '''insert into sys.ntui(username,major,기초문해교육,핵심교양,기초과학교육,전공필수,전공선택,잔여학점,졸업학점) values(%s,%s,7,12,12,18,66,15,130)'''
+        elif number >19 : 
+            script = '''insert into sys.ntui(username,major,기초문해교육,핵심교양,기초과학교육,전공필수,전공선택,잔여학점,졸업학점) values(%s,%s,9,33,0,18,60,10,130)'''    
+
+        cio.execute(script, (name,major))
+        ci.commit()
+
+
+
+
+    ans = input("자신이 수강한 적이 있어서 졸업요구학점에 반영할거면 y 없으면 n을 눌러주세요 : ")
+    if ans == "y":
+
+
+        # 기존 요구 학점을 데이터베이스에서 가져옴
+        select_script = '''
+        SELECT 기초문해교육, 핵심교양, 기초과학교육, 전공필수, 전공선택, 잔여학점 
+        FROM sys.ntui 
+        WHERE username = %s AND major = %s
+        '''
+        cio.execute(select_script, (name, major))
+        result = cio.fetchone()
+
+
+        if result :
+            기초문해교육, 핵심교양, 기초과학교육, 전공필수, 전공선택, 잔여학점 = result
+
+
+                
+            basic = get_int_input("기초문해교육 몇 학점 이수하셨습니까? : ")
+            core = get_int_input("핵심교양 몇 학점 이수하셨습니까? : ")
+            basics = get_int_input("기초과학교육 몇 학점 이수하셨습니까? : ")
+            tr = get_int_input("전공필수 몇 학점 이수하셨습니까? : ")
+            ts = get_int_input("전공선택 몇 학점 이수하셨습니까? : ")
+            rem = get_int_input("잔여학점 몇 학점 이수하셨습니까? : ")
+
+            기초문해교육_남은학점 = 기초문해교육 - basic
+            핵심교양_남은학점 = 핵심교양 - core
+            기초과학교육_남은학점 = 기초과학교육 - basics
+            전공필수_남은학점 = 전공필수 -tr
+            전공선택_남은학점 = 전공선택 - ts
+            잔여학점_남은학점 = 잔여학점 - rem
+
+            update_script = '''
+            UPDATE sys.ntui 
+            SET 기초문해교육 = %s, 핵심교양 = %s, 기초과학교육 = %s, 전공필수 = %s, 전공선택 = %s, 잔여학점 = %s 
+            WHERE username = %s AND major = %s
+            '''
+
+            cio.execute(update_script, (기초문해교육_남은학점, 핵심교양_남은학점, 기초과학교육_남은학점, 전공필수_남은학점, 전공선택_남은학점, 잔여학점_남은학점, name, major))
+            ci.commit()
+            print("업데이트 되었습니다.")
+
+
+            cio.execute(select_script, (name, major))
+            up_result = cio.fetchone()
+            if up_result:
+                기초문해교육, 핵심교양, 기초과학교육, 전공필수, 전공선택, 잔여학점 = up_result
+                print("졸업요구학점 업데이트 했습니다 ")
+                
+                print(f"\n{name}님, 졸업요구학점 업데이트 결과입니다.")
+                print(f"기초문해교육 남은 학점: {up_result[0]}")
+                print(f"핵심교양 남은 학점: {up_result[1]}")
+                print(f"기초과학교육 남은 학점: {up_result[2]}")
+                print(f"전공필수 남은 학점: {up_result[3]}")
+                print(f"전공선택 남은 학점: {up_result[4]}")
+                print(f"잔여학점 남은 학점: {up_result[5]}")
+
+
+
+    # 전공 넣는거 
+    for i in range(len(cur)):
+        if major == cur[i][2] and grade == cur[i][3] and shift == cur[i][4]:
+            timetable.append(cur[i])
+    print(timetable)
+
+
+    # 선호하지 않는 요일
+    reweekly = set(weekly) - set(choice_weekly) 
+
+    # 중복된 과목을 찾기 위한 맵 생성
+    course_map = {}
+    for i, entry in enumerate(timetable):
+        course_name = entry[7]
+        if course_name in course_map:
+            course_map[course_name].append(i)
+        else:
+            course_map[course_name] = [i]
+    # 
+    # 중복된 항목에 대해 사용자가 삭제할 항목을 선택하도록 함
+    ma_timetable = timetable[:]
+    for course_name, indices in course_map.items():
+        if len(indices) > 1:
+            print(f"\n중복된 과목: {course_name}")
+            for idx, actual_index in enumerate(indices):
+                print(f"{idx + 1}. {timetable[actual_index]}")
+
+            # 사용자가 삭제할 항목을 선택
+            choice = int(input(f"\n삭제할 항목의 번호를 선택하세요 (1-{len(indices)}): ")) - 1
+
+            # 선택한 항목을 삭제
+            ma_timetable.pop(indices[choice])
+
+
+    if ans == "y":
+        # 초과학점 삭제 
+        sum = 0
+        sum1 = 0
+        tr_tem = []
+        ts_tem=[]
+
+        for i in range(len(ma_timetable)):
+
+            if ma_timetable[i][11] == "전공필수":
+                sum += int(ma_timetable[i][17])
+                tr_tem.append(ma_timetable[i])            
+            elif ma_timetable[i][11] == "전공선택":
+                sum1 += int(ma_timetable[i][17])
+                ts_tem.append(ma_timetable[i])
+
+        sum = 전공필수 - sum
+        if sum < 0 : 
+            ans1 = input(("전공필수 학점이 초과했습니다 그래도 들으시겠습니까? (y/n)" ))
+            if ans1 == "y":
+                pass
+            elif ans1 == "n":
+                for i in range(len(tr_tem)):
+                    print("전공필수 과목 : " ,tr_tem[i][7])
+                    
+                sa = get_int_input(f"선택할 과목 번호를 입력하세요 0 ~ {len(tr_tem)-1 } : ")
+                if 0 <= sa <= len(tr_tem):
+                    tr_tem.pop(sa)
+                else:
+                    print("다시입력하세요")
+            else:
+                print("다시입력하세요")
+
+
+        sum1 = 전공선택 - sum1
+        if sum1 < 0 : 
+            ans2 = input(("전공선택 학점이 초과했습니다 그래도 들으시겠니까? (y/n)" ))
+            if ans2 == "y":
+                pass
+            elif ans2 == "n":
+                for i in range(len(ts_tem)):
+                    print("전공선택 과목들 : ",ts_tem[i][7])
+                        
+                sa1 = get_int_input(f"선택할 과목 번호를 입력하세요 0 ~ {len(ts_tem)-1 } : ")
+                if 0 <= sa1 <= len(ts_tem):
+                    ts_tem.pop(sa1)
+                else: 
+                    print("다시입력하세요")
+            else:
+                print("다시입력하세요")
+
+        major_timetable = ts_tem+tr_tem
+
+
+        # 최종 시간표 출력
+        print("\n전공 시간표:")
+        for item in major_timetable:
+            print(item)
+
+    elif ans =="n":
+        major_timetable = ma_timetable
+
+        print("\n전공 시간표:")
+        for item in major_timetable:
+            print(item)
+
+
+
+
+    # 선호하지 않는 요일이 있다고 판별하는것 
+    for i in range(len(major_timetable)):
+        q = major_timetable[i][23]
+        for q1 in q:
+            if q1 in reweekly:
+                h = True
+                break
+
+    if h:
+        print("선호하지 않은 요일이 있습니다. 요일에 포함 시키겠습니까 아니면 전공 요일만 넣겠습니까?")
+        answer = get_int_input("넣으실거면 1 전공 요일만 넣으실거면 2를 눌러주세요 : ")
+        if answer == 1 :
+            print(reweekly)
+            answer2 = input("넣으실 요일을 입력하세요(ex: 금) : ").split(',')
+            choice_weekly += answer2
+        else : 
+            h = False
+    else:
+        print("양호")
+
+    
+
+    
+    an_score= add_subjects_until_credit_limit(major_timetable,an_score,score,fina_subjects)
+    if an_score >= score :
+        print("학점을 초과했습니다.")
+        break
+
+
+
+    # 교양인것들만 리스트에 넣기 
+
+    culture_imetable = [] 
+    for i in range(len(cur)):
+        if "브라이트칼리지" == cur[i][1] and shift == cur[i][4]:
+            culture_imetable.append(cur[i])
+    
+    reweekly = set(weekly) - set(choice_weekly) 
+
+    # (선호하지 않는 요일 삭제)역순으로 순회하면서 해당 요일이 포함된 항목 삭제
+    for i in range(len(culture_imetable) - 1, -1, -1):  # 역순으로 리스트 순회
+        q = culture_imetable[i][23]  # 요일 리스트
+        # q 중 하나라도 reweekly에 포함되면 삭제
+        if any(day in reweekly for day in q):  
+            culture_imetable.pop(i)  # 해당 항목 삭제
+
+    
+    
+
+    non_subjects = check(culture_imetable,major_timetable)
+    
+
+    if  number >= 21 and major == "소프트웨어융합전공" :
+        
+        bs_sub = ["미적분학1","미적분학2","확률과통계","선형대수학"]
+        bb_sub = ["1영역","2영역","3영역"]
+        print("영역별 3학점씩 이수해야합니다. (1~4)")
+        print("미적분학1,미적분학2,선형대수학,확률과통계는 기초과학교육 지정 교과목입니다.(4과목 이수시 4영역인정)")
+        
+        re_sub =[]
+        rec_sub = []
+
+        fil_sub = []
+
+        if 기초문해교육 == 0 :
+            for i in range(len(non_subjects)-1,-1,-1):
+                if non_subjects[i][5] == "기초문해교육":
+                    non_subjects.pop(i)
+
+        elif 기초문해교육 != 0 :
+            if 기초문해교육 % 2 == 0:
+                for i in range(len(non_subjects)-1,-1,-1):
+                    if non_subjects[i][5] == "기초문해교육" and non_subjects[i][17] == 3:
+                        non_subjects.pop(i)
+                    
+                    elif non_subjects[i][5] == "기초문해교육" : 
+                        if non_subjects[i][7] not in fil_sub:
+                            fil_sub.append(non_subjects[i][7])
+                print("선택해야는 과목 " ,fil_sub)
+            
+
+            elif 기초문해교육 == 3:
+                for i in range(len(non_subjects)-1,-1,-1):
+                    if non_subjects[i][5] == "기초문해교육" and non_subjects[i][17] == 2:
+                        non_subjects.pop(i)
+
+                    elif non_subjects[i][5] == "기초문해교육" : 
+                        if non_subjects[i][7] not in fil_sub:
+                            fil_sub.append(non_subjects[i][7])           
+                print("선택해야는 과목 " ,fil_sub)
+
+            elif 기초문해교육 == 5 or 기초문해교육 == 7 or 기초문해교육 == 9 :
+                for i in range(len(non_subjects)-1,-1,-1):
+                    if non_subjects[i][5] == "기초문해교육" :
+                        if non_subjects[i][7] not in fil_sub:
+                            fil_sub.append(non_subjects[i][7])
+                print("선택해야는 과목 " ,fil_sub)                       
+
+
+
+        ex_sub = get_string_input("지정한 기초과학교육 과목을 이수한것이 있으시면 y 아니시면 n을 눌러주세요 : ")
+        if ex_sub == "y":
+            print(bs_sub)
+            ex1_sub = get_string_input("이중에서 이수한 과목이름을 입력하세요 : ").split(",")
+            for j in range(len(ex1_sub)):
+                for i in range(len(non_subjects)-1,-1,-1):
+                    if non_subjects[i][7] == ex1_sub[j]:
+                        non_subjects.pop(i)
+
+            re_sub.extend(sorted(list(set(bs_sub) - set(ex1_sub))))
+
+        elif ex_sub == "n":
+            re_sub.extend(bs_sub) 
+
+
+        ex_answer = get_string_input("1영역,2영역,3영역 중 1학기에 수강한 영역이있면 무슨영역이였는지 적어주세요. 없으면 0 : ").split(",")
+        if ex_answer[0] == "0":
+            rec_sub.extend(bb_sub)
+
+        elif ex_answer[0] != "0" :
+            rec_sub.extend(list(set(bb_sub) - set(ex_answer)))
+
+        time_sub = []
+        
+        
+        sorted_subjects = count_matching_subjects(re_sub,non_subjects) # 과목갯수 정리 ex) 선형대가 과목이 한개고 미적분학1이 4개이면 선형대가 우선권갖게끔
+        
+
+
+
+        for i in range(len(sorted_subjects)):
+            time_sub = select_time_slot(sorted_subjects[i],non_subjects,time_sub)
+            non_subjects = check(non_subjects,time_sub)
+
+        
+        an_score = add_subjects_until_credit_limit(time_sub,an_score,score,fina_subjects)
+        if an_score >= score :
+            print("학점을 초과했습니다.")
+            break
+        print("담을 수 있는 남은 학점은 : ",score - an_score)
+
+
+        one_time_sub = []
+        two_time_sub = []
+        three_time_sub = []
+        one_sub = []
+        two_sub = []
+        three_sub = []
+        four_sub = []
+        an_sub = []
+        oth_sub = []
+        bb_subjects = non_subjects.copy()
+        # 각 영역별로 과목 표시 
+
+
+
+        while True:
+            original_non_subjects = copy.deepcopy(non_subjects)
+            bb_subjects = copy.deepcopy(original_non_subjects)
+            if len(bb_sub) == 3: 
+
+                for j in range(len(bb_subjects)):
+                    if bb_subjects[j][5] == "1영역":
+                        if bb_subjects[j][7] not in one_sub:
+                            one_sub.append(bb_subjects[j][7])                
+
+                print("1영역",one_sub)
+                one_ans = get_string_input("1영역중에서 한과목을 선택해주세요 : ")
+
+                one_time_sub = select_time_slot(one_ans,bb_subjects,one_time_sub)
+                bb_subjects = check (bb_subjects,one_time_sub)
+
+                for j in range(len(bb_subjects)):
+                    if bb_subjects[j][5] == "2영역":
+                        if bb_subjects[j][7] not in two_sub:
+                            two_sub.append(bb_subjects[j][7])     
+                print("2영역",two_sub)
+                two_ans=get_string_input("2영역중에서 한과목을 선택해주세요 : ")
+
+                two_time_sub = select_time_slot(two_ans,bb_subjects,two_time_sub)
+                bb_subjects = check (bb_subjects,two_time_sub)
+
+
+                for j in range(len(bb_subjects)):
+                    if bb_subjects[j][5] == "3영역":
+                        if bb_subjects[j][7] not in three_sub:
+                            three_sub.append(bb_subjects[j][7])     
+                print("3영역",three_sub)
+                three_ans=get_string_input("3영역중에서 한과목을 선택해주세요 : ")
+
+                three_time_sub = select_time_slot(three_ans,bb_subjects,three_time_sub)
+                bb_subjects = check (bb_subjects,three_time_sub)
+
+            oth_sub = three_time_sub + two_time_sub + one_time_sub
+
+
+            ask_agree = get_string_input("원하시는 과목별로 담으셨습니까 y/n : ")
+            if ask_agree == "y":
+                break
+
+            elif ask_agree =="n":
+                print("다시 영역별 과목을 선택해주세요 ")
+                continue
+            
+            elif len(bb_sub) == 2:
+                
+                for i in range(len(bb_sub)):
+                    
+                    if len(bb_sub[i]) == "1영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "1영역":
+                                if bb_subjects[j][7] not in one_sub:
+                                    one_sub.append(bb_subjects[j][7])                
+                        print("1영역",one_sub)
+                        one_ans = get_string_input("1영역중에서 한과목을 선택해주세요 : ")
+
+                        one_time_sub = select_time_slot(one_ans,bb_subjects,one_time_sub)
+                        bb_subjects = check (bb_subjects,one_time_sub)
+
+
+                    elif len(bb_sub[i]) == "2영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "2영역":
+                                if bb_subjects[j][7] not in two_sub:
+                                    two_sub.append(bb_subjects[j][7])                             
+                        print("2영역",two_sub)
+                        two_ans=get_string_input("2영역중에서 한과목을 선택해주세요 : ")
+
+                        two_time_sub = select_time_slot(two_ans,bb_subjects,two_time_sub)
+                        bb_subjects = check (bb_subjects,two_time_sub)
+
+                    elif len(bb_sub[i]) == "3영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "3영역":
+                                if bb_subjects[j][7] not in three_sub:
+                                    three_sub.append(bb_subjects[j][7])    
+                        print("3영역",three_sub)
+                        three_ans=get_string_input("3영역중에서 한과목을 선택해주세요 : ")
+
+                        three_time_sub = select_time_slot(three_ans,bb_subjects,three_time_sub)
+                        bb_subjects = check (bb_subjects,three_time_sub)              
+  
+                oth_sub = three_time_sub + two_time_sub + one_time_sub
+
+            ask_agree = get_string_input("원하시는 과목별로 담으셨습니까 y/n : ")
+            if ask_agree == "y":
+                break
+
+            elif ask_agree =="n":
+                print("다시 영역별 과목을 선택해주세요 ")
+                continue                    
+            
+            elif len(bb_sub) == 1:
+            
+                for i in range(len(bb_sub)):
+            
+                    if len(bb_sub[i]) == "1영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "1영역":
+                                if bb_subjects[j][7] not in one_sub:
+                                    one_sub.append(bb_subjects[j][7])                            
+                        print("1영역",one_sub)
+                        one_ans = get_string_input("1영역중에서 한과목을 선택해주세요 : ")
+
+                        one_time_sub = select_time_slot(one_ans,bb_subjects,one_time_sub)
+                        bb_subjects = check (bb_subjects,one_time_sub)
+
+
+                    elif len(bb_sub[i]) == "2영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "2영역":
+                                if bb_subjects[j][7] not in two_sub:
+                                    two_sub.append(bb_subjects[j][7])                              
+                        print("2영역",two_sub)
+                        two_ans=get_string_input("2영역중에서 한과목을 선택해주세요 : ")
+
+                        two_time_sub = select_time_slot(two_ans,bb_subjects,two_time_sub)
+                        bb_subjects = check (bb_subjects,two_time_sub)
+
+
+                    elif len(bb_sub[i]) == "3영역":
+                        for j in range(len(bb_subjects)):
+                            if bb_subjects[j][5] == "3영역":
+                                if bb_subjects[j][7] not in three_sub:
+                                    three_sub.append(bb_subjects[j][7])    
+                        print("3영역",three_sub)
+                        three_ans=get_string_input("3영역중에서 한과목을 선택해주세요 : ")
+
+                        three_time_sub = select_time_slot(three_ans,bb_subjects,three_time_sub)
+                        bb_subjects = check (bb_subjects,three_time_sub)              
+
+                oth_sub = three_time_sub + two_time_sub + one_time_sub
+            ask_agree = get_string_input("원하시는 과목별로 담으셨습니까 y/n : ")
+            if ask_agree == "y":
+                break
+
+            elif ask_agree =="n":
+                print("다시 영역별 과목을 선택해주세요 ")
+                continue              
+
+        an_score = add_subjects_until_credit_limit(oth_sub,an_score,score,fina_subjects)
+        if an_score >= score :
+            print("학점을 초과했습니다.")
+            break       
+            
+
+
+
+
+        # for i in range(len(sorted_subjects)):
+        #     select_time_slot(sorted_subjects[i],non_subjects)
+        #     non_subjects = check(non_subjects,time_sub)        
+        # # if len(bb_sub) == 2:
+
+
+
+
+
+for i in range(len(fina_subjects)):
+    print("최종 시간표입니다.",fina_subjects[i])
+            
+
+
+
