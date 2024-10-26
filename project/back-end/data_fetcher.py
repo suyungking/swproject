@@ -30,7 +30,14 @@ user_cursor = user_db.cursor(pymysql.cursors.DictCursor)
 
 def fetch_user_data(user_id):
     logger.debug(f"사용자 ID {user_id}의 데이터를 가져오는 중")
-    query = "SELECT * FROM users WHERE id = %s"
+
+    # completed_* 필드 없이 사용자 정보를 가져옵니다.
+    query = """
+    SELECT basic_literacy, core_liberal_arts, basic_science, 
+           required_major, elective_major, elective_liberal_arts
+    FROM users
+    WHERE id = %s
+    """
     user_cursor.execute(query, (user_id,))
     user_data = user_cursor.fetchone()
     logger.debug(f"가져온 사용자 데이터: {user_data}")
