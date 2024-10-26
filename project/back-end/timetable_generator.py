@@ -1,7 +1,13 @@
 import random
 import difflib
 from datetime import datetime, timedelta
+import logging
 
+# 로깅 설정
+logging.basicConfig(level=logging.DEBUG)
+logger = logging.getLogger(__name__)
+
+# 수업 교시를 시간으로 변환하는 함수
 def convert_class_period_to_time(period):
     period_to_time = {
         1: ('09:00', '09:50'),
@@ -22,6 +28,9 @@ def convert_class_period_to_time(period):
     }
     return period_to_time.get(period, ('00:00', '00:00'))
 
+# 설명: 이 함수는 수업 교시를 실제 시간으로 변환합니다. 예를 들어, 1교시는 09:00-09:50에 해당합니다.
+
+# 시간표 문자열을 파싱하는 함수
 def parse_timetable(timetable_str):
     parsed_timetable = []
     for time_slot in timetable_str.split('/'):
@@ -40,6 +49,9 @@ def parse_timetable(timetable_str):
     
     return ' / '.join(parsed_timetable)
 
+# 설명: 이 함수는 시간표 문자열을 파싱하여 실제 시간으로 변환합니다. 예를 들어, "월 1~2"를 "월 09:00~10:50"으로 변환합니다.
+
+# 오전/오후 선호도에 따라 과목을 필터링하는 함수
 def filter_courses_by_morning_afternoon(courses, morning_afternoon, include_night):
     logger.debug(f"오전/오후 선호도: {morning_afternoon}, 야간 포함: {include_night}에 따라 과목을 필터링하는 중")
     if morning_afternoon == 'all':
@@ -68,6 +80,9 @@ def filter_courses_by_morning_afternoon(courses, morning_afternoon, include_nigh
     logger.debug(f"{len(filtered_courses)}개의 과목을 필터링함")
     return filtered_courses
 
+# 설명: 이 함수는 사용자의 오전/오후 선호도와 야간 수업 포함 여부에 따라 과목을 필터링합니다.
+
+# 과목의 우선순위를 계산하는 함수
 def calculate_course_priority(course, user_grade, remaining_credits, include_teacher_training):
     priority = 0
     
@@ -94,6 +109,9 @@ def calculate_course_priority(course, user_grade, remaining_credits, include_tea
 
     return priority
 
+# 설명: 이 함수는 과목의 우선순위를 계산합니다. 학년, 이수구분, 남은 학점 등을 고려하여 우선순위를 결정합니다.
+
+# 시간표 충돌을 해결하는 함수
 def resolve_schedule_conflicts(timetable, user_grade, remaining_credits, include_teacher_training):
     logger.debug("시간표 충돌을 해결하는 중")
     final_timetable = []
@@ -114,6 +132,9 @@ def resolve_schedule_conflicts(timetable, user_grade, remaining_credits, include
     logger.debug(f"충돌 해결 후 최종 시간표에 {len(final_timetable)}개의 과목이 포함됨")
     return final_timetable
 
+# 설명: 이 함수는 시간표 내의 충돌을 해결합니다. 우선순위가 높은 과목을 유지하고 충돌하는 과목을 제거합니다.
+
+# 유사한 과목을 찾는 함수
 def find_similar_courses(course, all_courses, num_suggestions=3):
     logger.debug(f"{course['과목명']}과 유사한 과목을 찾는 중")
     course_name = course['과목명']
@@ -122,6 +143,9 @@ def find_similar_courses(course, all_courses, num_suggestions=3):
     logger.debug(f"{len(similar_courses)}개의 유사한 과목을 찾음")
     return similar_courses
 
+# 설명: 이 함수는 주어진 과목과 유사한 다른 과목들을 찾습니다. 과목명의 유사도를 기준으로 합니다.
+
+# 시간 충돌을 확인하는 함수
 def is_time_conflict(timetable, new_course):
     new_course_times = set(new_course['시간표'].split('/'))
     for course in timetable:
@@ -130,6 +154,9 @@ def is_time_conflict(timetable, new_course):
             return True
     return False
 
+# 설명: 이 함수는 새로운 과목이 기존 시간표와 충돌하는지 확인합니다.
+
+# 대체 과목을 찾는 함수
 def find_alternative_courses(course, all_courses, timetable, max_alternatives=3):
     logger.debug(f"{course['과목명']}의 대체 과목을 찾는 중")
     similar_courses = find_similar_courses(course, all_courses)
@@ -142,6 +169,9 @@ def find_alternative_courses(course, all_courses, timetable, max_alternatives=3)
     logger.debug(f"{len(alternatives)}개의 대체 과목을 찾음")
     return alternatives
 
+# 설명: 이 함수는 충돌이 발생한 과목의 대체 과목을 찾습니다. 유사한 과목 중 시간 충돌이 없는 과목을 선택합니다.
+
+# 초기 시간표를 생성하는 함수
 def generate_initial_timetable(required_courses, elective_and_liberal_arts, advisory_course, user_grade, remaining_credits, max_credits, preferred_days, morning_afternoon, include_night, include_teacher_training):
     logger.debug("초기 시간표를 생성하는 중")
     
@@ -179,8 +209,11 @@ def generate_initial_timetable(required_courses, elective_and_liberal_arts, advi
     logger.debug(f"초기 시간표 생성 완료: {len(initial_timetable)}개 과목, 총 {current_credits}학점")
     return initial_timetable
 
+# 설명: 이 함수는 초기 시간표를 생성합니다. 필수 과목, 선택 과목, 교양 과목 등을 고려하여 사용자의 선호도와 제약 조건에 맞는 시간표를 만듭니다.
+
+# 과목이 선호하는 시간대에 있는지 확인하는 함수
 def is_course_in_preferred_time(course, morning_afternoon, include_night):
-    course_times  = course['시간표'].split('/')
+    course_times = course['시간표'].split('/')
     for time_slot in course_times:
         time = time_slot.split(' ')[1].split('~')[0]
         hour = int(time.split(':')[0])
@@ -197,9 +230,12 @@ def is_course_in_preferred_time(course, morning_afternoon, include_night):
     
     return False
 
+# 설명: 이 함수는 주어진 과목이 사용자가 선호하는 시간대에 있는지 확인합니다.
+
+# 시간표를 생성하는 메인 함수
 def generate_timetable(user_id, dynamic_data):
     logger.debug(f"사용자 {user_id}의 시간표 생성 시작")
-    logger.debug(f"동적 데이터: {json.dumps(dynamic_data, indent=2)}")
+    logger.debug(f"동적 데이터: {dynamic_data}")
     
     user_data = fetch_user_data(user_id)
     logger.debug(f"가져온 사용자 데이터: {user_data}")
@@ -208,27 +244,38 @@ def generate_timetable(user_id, dynamic_data):
         logger.error(f"사용자를 찾을 수 없음: {user_id}")
         return {"error": "사용자를 찾을 수 없습니다."}, 404
 
+    # 필수 필드 검증
+    required_fields = ['max_credits', 'preferred_days', 'morning_afternoon', 'grade']
+    for field in required_fields:
+        if field not in dynamic_data:
+            logger.error(f"필수 필드 누락: {field}")
+            return {"error": f"필수 필드가 누락되었습니다: {field}"}, 400
+
+    # 사용자 설정 및 선호도 추출
     max_credits = dynamic_data.get('max_credits', 21)
     preferred_days = dynamic_data.get('preferred_days', ['월', '화', '수', '목', '금'])
     morning_afternoon = dynamic_data.get('morning_afternoon', 'all')
     include_night = dynamic_data.get('include_night', False)
     shift = dynamic_data.get('shift', '주간')
-    selected_areas = dynamic_data.get('selected_areas', ['1영역', '2영역', '3영역', '4영역'])
+    selected_areas = dynamic_data.get('selected_areas', ['1영역', 
+    '2영역', '3영역', '4영역'])
     include_elective_liberal_arts = dynamic_data.get('include_elective_liberal_arts', False)
     include_teacher_training = dynamic_data.get('include_teacher_training', False)
     user_grade = dynamic_data.get('grade', user_data.get('grade', 1))
 
+    # 남은 학점 계산
     remaining_credits = {
-        "basic_literacy": user_data.get("basic_literacy", 0) - user_data.get("completed_basic_literacy", 0),
-        "core_liberal_arts": user_data.get("core_liberal_arts", 0) - user_data.get("completed_core_liberal_arts", 0),
-        "basic_science": user_data.get("basic_science", 0) - user_data.get("completed_basic_science", 0),
-        "required_major": user_data.get("required_major", 0) - user_data.get("completed_required_major", 0),
-        "elective_major": user_data.get("elective_major", 0) - user_data.get("completed_elective_major", 0),
-        "elective_liberal_arts": user_data.get("elective_liberal_arts", 0) - user_data.get("completed_elective_liberal_arts", 0),
+        "basic_literacy": user_data.get("basic_literacy", 0) - dynamic_data.get("completed_credits", {}).get("completed_basic_literacy", 0),
+        "core_liberal_arts": user_data.get("core_liberal_arts", 0) - dynamic_data.get("completed_credits", {}).get("completed_core_liberal_arts", 0),
+        "basic_science": user_data.get("basic_science", 0) - dynamic_data.get("completed_credits", {}).get("completed_basic_science", 0),
+        "required_major": user_data.get("required_major", 0) - dynamic_data.get("completed_credits", {}).get("completed_required_major", 0),
+        "elective_major": user_data.get("elective_major", 0) - dynamic_data.get("completed_credits", {}).get("completed_elective_major", 0),
+        "elective_liberal_arts": user_data.get("elective_liberal_arts", 0) - dynamic_data.get("completed_credits", {}).get("completed_elective_liberal_arts", 0),
     }
 
     logger.debug(f"남은 학점: {remaining_credits}")
 
+    # 과목 데이터 가져오기
     advisory_course = add_advisory_course(dynamic_data.get('include_advisory', False))
     required_courses = add_required_courses(user_data, remaining_credits)
     elective_and_liberal_arts = add_elective_and_liberal_arts_courses(
@@ -246,6 +293,7 @@ def generate_timetable(user_id, dynamic_data):
     logger.debug(f"필수 과목: {required_courses}")
     logger.debug(f"선택 및 교양 과목: {elective_and_liberal_arts}")
 
+    # 초기 시간표 생성
     initial_timetable = generate_initial_timetable(
         required_courses,
         elective_and_liberal_arts,
@@ -262,6 +310,7 @@ def generate_timetable(user_id, dynamic_data):
     logger.debug(f"초기 시간표 크기: {len(initial_timetable)}")
     logger.debug(f"초기 시간표: {initial_timetable}")
 
+    # 최종 시간표 생성
     final_timetable = []
     alternative_courses = {}
     current_credits = 0
@@ -282,10 +331,12 @@ def generate_timetable(user_id, dynamic_data):
         else:
             break
 
+    # 시간표 충돌 해결
     final_timetable = resolve_schedule_conflicts(final_timetable, user_grade, remaining_credits, include_teacher_training)
 
     logger.debug(f"충돌 해결 후 최종 시간표: {final_timetable}")
 
+    # 시간표 생성 실패 시 오류 반환
     if len(final_timetable) < 1:
         logger.error("유효한 시간표를 생성할 수 없음")
         return {"error": "유효한 시간표를 생성할 수 없습니다. 선택한 조건을 확인해주세요."}, 400
@@ -293,6 +344,7 @@ def generate_timetable(user_id, dynamic_data):
     logger.debug(f"최종 시간표 크기: {len(final_timetable)}")
     logger.debug(f"총 학점: {current_credits}")
 
+    # 결과 생성
     result = {
         "message": "시간표가 성공적으로 생성되었습니다.",
         "timetable": [
@@ -322,14 +374,17 @@ def generate_timetable(user_id, dynamic_data):
             ] for course, alternatives in alternative_courses.items()
         }
     }
-    logger.debug(f"최종 결과: {json.dumps(result, indent=2, ensure_ascii=False)}")
+    logger.debug(f"최종 결과: {result}")
     return result
 
+# 설명: 이 함수는 시간표 생성의 전체 과정을 관리합니다. 사용자 데이터를 가져오고, 과목을 선택하고, 시간표를 생성하고, 충돌을 해결하는 등의 모든 과정을 조율합니다.
+
+# Flask 라우트 핸들러
 @app.route('/generate-timetable', methods=['POST'])
 def handle_generate_timetable_request():
     logger.debug("시간표 생성 요청 수신")
     data = request.json
-    logger.debug(f"수신된 데이터: {json.dumps(data, indent=2, ensure_ascii=False)}")
+    logger.debug(f"수신된 데이터: {data}")
     user_id = data.get('user_id')
     dynamic_data = data.get('dynamic_data')
 
@@ -339,8 +394,12 @@ def handle_generate_timetable_request():
 
     result = generate_timetable(user_id, dynamic_data)
     logger.debug(f"사용자 {user_id}의 시간표 생성 완료")
-    logger.debug(f"반환 결과: {json.dumps(result, indent=2, ensure_ascii=False)}")
+    logger.debug(f"반환 결과: {result}")
     return jsonify(result)
+
+# 설명: 이 함수는 Flask 웹 애플리케이션의 라우트 핸들러입니다. '/generate-timetable' 엔드포인트로 들어오는 POST 요청을 처리하고, 시간표 생성 함수를 호출하여 결과를 반환합니다.
 
 if __name__ == "__main__":
     app.run(port=5000)
+
+# 설명: 이 부분은 스크립트가 직접 실행될 때 Flask 애플리케이션을 5000번 포트에서 실행합니다.
