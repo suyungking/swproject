@@ -1,5 +1,3 @@
-// TimeTableGenerator.js
-
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { fetchUserInfo, generateTimetable } from '../services/api';
@@ -182,12 +180,12 @@ const TimeTableGenerator = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-  
+
     if (step < 5) {
       setStep(step + 1);
       return;
     }
-  
+
     try {
       const userId = JSON.parse(localStorage.getItem('user')).id;
       const timetableData = {
@@ -203,21 +201,29 @@ const TimeTableGenerator = () => {
           selected_areas: formData.selected_areas,
           include_elective_liberal_arts: formData.include_elective_liberal_arts,
           include_teacher_training: formData.include_teacher_training,
+          completed_credits: {
+            completed_basic_literacy: parseInt(formData.completed_credits.basic_literacy) || 0,
+            completed_core_liberal_arts: parseInt(formData.completed_credits.core_liberal_arts) || 0,
+            completed_basic_science: parseInt(formData.completed_credits.basic_science) || 0,
+            completed_required_major: parseInt(formData.completed_credits.required_major) || 0,
+            completed_elective_major: parseInt(formData.completed_credits.elective_major) || 0,
+            completed_elective_liberal_arts: parseInt(formData.completed_credits.elective_liberal_arts) || 0,
+          },
         }
       };
       console.log("Sending timetable data to backend:", JSON.stringify(timetableData, null, 2));
       const result = await generateTimetable(timetableData);
       console.log("Received timetable result from backend:", JSON.stringify(result, null, 2));
-      
+
       if (result.timetable && Array.isArray(result.timetable) && result.timetable.length > 0) {
         console.log("Timetable generated successfully. Navigating to interactive timetable.");
-        navigate('/interactive-timetable', { 
-          state: { 
-            timetable: result.timetable, 
+        navigate('/interactive-timetable', {
+          state: {
+            timetable: result.timetable,
             remainingCredits: result.remaining_credits,
             totalCredits: result.total_credits,
             alternativeCourses: result.alternative_courses
-          } 
+          }
         });
       } else {
         console.error("Timetable generation failed. Empty or invalid timetable received:", result);
