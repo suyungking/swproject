@@ -2,11 +2,19 @@ import express from 'express';
 import cors from 'cors';
 import mysql from 'mysql2/promise';
 import userAuthRoutes from './userAuth.js';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import path from 'path';
+
+
+
 
 const app = express();
 app.use(express.json());
 app.use(cors({
   origin: 'http://localhost:3000',
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   credentials: true
 }));
 
@@ -16,6 +24,10 @@ const db = mysql.createPool({
   password: 'admin',
   database: 'user_db'
 });
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
 
 // userAuth 라우트에 데이터베이스 연결 전달
 app.use('/api/auth', userAuthRoutes(db));
@@ -77,13 +89,29 @@ app.get('/api/user/:userId', async (req, res) => {
 app.post('/api/generate-timetable', async (req, res) => {
   try {
     const timetableData = req.body;
-    // 시간표 생성 로직 추가
-    res.status(201).json({ message: '시간표가 성공적으로 생성되었습니다.', timetable: timetableData });
+    const response = await fetch('http://localhost:5001/generate-timetable', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(timetableData),
+    });
+
+    if (!response.ok) {
+      console.error(`Flask server responded with status: ${response.status}`);
+      console.error(`Response text: ${await response.text()}`);
+      throw new Error(`Flask server responded with status: ${response.status}`);
+    }
+
+    const result = await response.json();
+    res.json(result);
   } catch (error) {
-    console.error('시간표 생성 오류:', error);
-    res.status(500).json({ message: '시간표 생성에 실패했습니다.' });
+    console.error('Error in generate-timetable:', error);
+    res.status(500).json({ error: error.message });
   }
 });
+
+
 
 
 // 전역 에러 핸들러
