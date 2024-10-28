@@ -1,9 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-// InteractiveTimeTable 컴포넌트 정의
 const InteractiveTimeTable = () => {
-  // 상태 변수 정의
   const [timetableData, setTimetableData] = useState(null);
   const [remainingCredits, setRemainingCredits] = useState(null);
   const [totalCredits, setTotalCredits] = useState(null);
@@ -11,7 +9,6 @@ const InteractiveTimeTable = () => {
   const location = useLocation();
   const navigate = useNavigate();
 
-  // 컴포넌트 마운트 시 시간표 데이터 로드
   useEffect(() => {
     const state = location.state;
     if (state && state.timetable && Array.isArray(state.timetable) && state.timetable.length > 0) {
@@ -26,49 +23,82 @@ const InteractiveTimeTable = () => {
     }
   }, [location, navigate]);
 
+  const timeSlots = [
+    { period: 1, start: '09:00', end: '09:50' },
+    { period: 2, start: '10:00', end: '10:50' },
+    { period: 3, start: '11:00', end: '11:50' },
+    { period: 4, start: '12:00', end: '12:50' },
+    { period: 5, start: '13:00', end: '13:50' },
+    { period: 6, start: '14:00', end: '14:50' },
+    { period: 7, start: '15:00', end: '15:50' },
+    { period: 8, start: '16:00', end: '16:50' },
+    { period: 9, start: '17:00', end: '17:50' },
+    { period: 10, start: '18:00', end: '18:45' },
+    { period: 11, start: '18:45', end: '19:30' },
+    { period: 12, start: '19:35', end: '20:20' },
+    { period: 13, start: '20:20', end: '21:05' },
+    { period: 14, start: '21:10', end: '21:55' },
+    { period: 15, start: '21:55', end: '22:40' }
+  ];
 
-  
-  // 시간표 렌더링 함수
+  const days = ['월', '화', '수', '목', '금'];
+
   const renderTimetable = () => {
     if (!timetableData || !Array.isArray(timetableData) || timetableData.length === 0) {
-      return <p>시간표 데이터가 없거나 올바르지 않습니다.</p>;
+      return <p style={styles.error}>시간표 데이터가 없거나 올바르지 않습니다.</p>;
     }
-
-    const days = ['월', '화', '수', '목', '금'];
-    const times = Array.from({ length: 13 }, (_, i) => i + 9); // 9시부터 21시까지
-
+  
+    const maxEndTime = Math.max(...timetableData.map(course => parseFloat(course.end_time)));
+    const displayedTimeSlots = timeSlots.filter(slot => slot.period <= Math.ceil(maxEndTime));
+    const headerCellHeight = 40; // 요일 헤더 셀의 높이
+  
     return (
-      <table style={styles.table}>
-        <thead>
-          <tr>
-            <th style={styles.th}>시간</th>
-            {days.map(day => <th key={day} style={styles.th}>{day}</th>)}
-          </tr>
-        </thead>
-        <tbody>
-          {times.map(time => (
-            <tr key={time}>
-              <td style={styles.td}>{`${time}:00`}</td>
-              {days.map(day => {
-                const course = timetableData.find(c => 
-                  c.day === day && 
-                  parseInt(c.start_time.split(':')[0]) <= time &&
-                  parseInt(c.end_time.split(':')[0]) > time
-                );
+      <div style={styles.timetableContainer}>
+        <div style={styles.timeColumn}>
+          <div style={styles.headerCell}>교시</div>
+          {displayedTimeSlots.map((slot) => (
+            <div key={slot.period} style={styles.timeSlot}>
+              <div>{slot.period}</div>
+              <div style={styles.timeInfo}>{slot.start}</div>
+            </div>
+          ))}
+        </div>
+        {days.map((day) => (
+          <div key={day} style={styles.dayColumn}>
+            <div style={styles.headerCell}>{day}</div>
+            {timetableData
+              .filter(course => course.day === `(${day})`)
+              .map((course, index) => {
+                const startSlot = Math.floor(parseFloat(course.start_time)) - 1;
+                const endSlot = Math.floor(parseFloat(course.end_time)) - 1;
+                const isHalfStart = parseFloat(course.start_time) % 1 !== 0;
+                const isHalfEnd = parseFloat(course.end_time) % 1 !== 0;
+  
+                // 요일 헤더 셀 높이를 고려하여 각 과목의 위치를 조정
+                const top = headerCellHeight + startSlot * 40 + (isHalfStart ? 20 : 0);
+                const height = Math.max((endSlot - startSlot) * 40 + (isHalfEnd ? 20 : 40), 40);
+  
                 return (
-                  <td key={`${day}-${time}`} style={styles.td}>
-                    {course ? course.name : ''}
-                  </td>
+                  <div
+                    key={index}
+                    style={{
+                      ...styles.courseCell,
+                      top: `${top}px`, // top 위치 조정
+                      height: `${height}px`, // height 설정
+                      backgroundColor: getRandomColor(),
+                    }}
+                  >
+                    <div style={styles.courseName}>{course.name}</div>
+                    <div style={styles.courseInfo}>{course.professor}</div>
+                  </div>
                 );
               })}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </div>
+        ))}
+      </div>
     );
   };
 
-  // 과목 목록 렌더링 함수
   const renderCourseList = () => {
     if (!timetableData || !Array.isArray(timetableData) || timetableData.length === 0) {
       return <p>과목 목록 데이터가 없거나 올바르지 않습니다.</p>;
@@ -85,7 +115,6 @@ const InteractiveTimeTable = () => {
     );
   };
 
-  // 남은 학점 정보 렌더링 함수
   const renderRemainingCredits = () => {
     if (!remainingCredits) {
       return <p>남은 학점 정보가 없습니다.</p>;
@@ -103,7 +132,6 @@ const InteractiveTimeTable = () => {
     );
   };
 
-  // 컴포넌트 렌더링
   const renderAlternativeCourses = () => {
     if (!alternativeCourses) {
       return null;
@@ -128,74 +156,171 @@ const InteractiveTimeTable = () => {
     );
   };
 
+  const getRandomColor = () => {
+    const colors = ['#FFE6E6', '#E6F3FF', '#E6FFE6', '#FFE6F3', '#E6FFFF', '#FFF3E6'];
+    return colors[Math.floor(Math.random() * colors.length)];
+  };
+
+  if (!timetableData) {
+    return <div style={styles.loadingMessage}>로딩 중...</div>;
+  }
+
   return (
     <div style={styles.container}>
-      <h1 style={styles.title}>생성된 시간표</h1>
+      <h1 style={styles.title}>내 시간표</h1>
       {renderTimetable()}
       <h2 style={styles.subtitle}>과목 목록</h2>
       {renderCourseList()}
       {renderRemainingCredits()}
-      <p>총 이수 학점: {totalCredits}</p>
+      <p style={styles.totalCredits}>총 이수 학점: {totalCredits}</p>
       {renderAlternativeCourses()}
-      <button onClick={() => navigate('/generate-timetable')} style={styles.button}>
-        시간표 다시 생성하기
-      </button>
+      <div style={styles.buttonContainer}>
+        <button onClick={() => navigate('/main')} style={styles.button}>
+          메인 페이지로 돌아가기
+        </button>
+        <button onClick={() => navigate('/generate-timetable')} style={styles.button}>
+          시간표 다시 생성하기
+        </button>
+      </div>
     </div>
   );
 };
 
-// 스타일 정의
 const styles = {
   container: {
     padding: '20px',
     maxWidth: '1000px',
     margin: '0 auto',
+    backgroundColor: '#f5f5f5',
+    color: '#333333',
+    fontFamily: 'Arial, sans-serif',
   },
   title: {
     textAlign: 'center',
     marginBottom: '20px',
+    fontSize: '24px',
+    fontWeight: 'bold',
+    color: '#333333',
   },
   subtitle: {
     marginTop: '30px',
     marginBottom: '10px',
+    fontSize: '20px',
+    fontWeight: 'bold',
+    color: '#333333',
   },
-  table: {
-    width: '100%',
-    borderCollapse: 'collapse',
+  timetableContainer: {
+    display: 'flex',
+    border: '1px solid #e0e0e0',
+    borderRadius: '8px',
+    overflow: 'hidden',
+    backgroundColor: '#ffffff',
   },
-  th: {
-    border: '1px solid #ddd',
-    padding: '8px',
-    backgroundColor: '#f2f2f2',
+  timeColumn: {
+    width: '80px',
+    borderRight: '1px solid #e0e0e0',
   },
-  td: {
-    border: '1px solid #ddd',
-    padding: '8px',
+  dayColumn: {
+    flex: 1,
+    position: 'relative',
+    borderRight: '1px solid #e0e0e0',
+    minHeight: '600px',
+  },
+  headerCell: {
+    padding: '10px',
     textAlign: 'center',
+    fontWeight: 'bold',
+    backgroundColor: '#333333',
+    color: '#ffffff',
+    borderBottom: '1px solid #e0e0e0',
+    height: '20px',
   },
-  courseList: {
-    listStyleType: 'none',
-    padding: 0,
+  timeSlot: {
+    height: '40px',
+    borderBottom: '1px solid #eeeeee',
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    justifyContent: 'center',
+    fontSize: '12px',
+    color: '#666666',
   },
-  courseItem: {
-    marginBottom: '8px',
+  timeInfo: {
+    fontSize: '10px',
+    color: '#666666',
+  },
+  courseCell: {
+    position: 'absolute',
+    left: '1px',
+    right: '1px',
+    padding: '5px',
+    fontSize: '12px',
+    border: '1px solid #e0e0e0',
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'column',
+    justifyContent: 'center',
+    backgroundColor: '#fafafa',
+    color: '#333333',
+    borderRadius: '4px',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+  },
+  courseName: {
+    fontWeight: 'bold',
+    marginBottom: '2px',
+    color: '#222222',
+  },
+  courseInfo: {
+    fontSize: '10px',
+    color: '#555555',
   },
   creditsInfo: {
     marginTop: '30px',
     padding: '15px',
-    backgroundColor: '#f2f2f2',
+    backgroundColor: '#f9f9f9',
     borderRadius: '5px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  },
+  totalCredits: {
+    marginTop: '20px',
+    fontSize: '18px',
+    fontWeight: 'bold',
+    textAlign: 'center',
+    color: '#333333',
+  },
+  alternativeCourses: {
+    marginTop: '30px',
+    padding: '15px',
+    backgroundColor: '#f9f9f9',
+    borderRadius: '5px',
+    boxShadow: '0 2px 4px rgba(0,0,0,0.1)',
+  },
+  buttonContainer: {
+    display: 'flex',
+    justifyContent: 'space-between',
+    marginTop: '30px',
   },
   button: {
-    display: 'block',
-    width: '200px',
-    margin: '20px auto',
-    padding: '10px',
-    backgroundColor: '#4CAF50',
-    color: 'white',
+    padding: '10px 20px',
+    backgroundColor: '#333333',
+    color: '#ffffff',
     border: 'none',
     borderRadius: '5px',
     cursor: 'pointer',
+    fontSize: '16px',
+    transition: 'background-color 0.3s',
+  },
+  loadingMessage: {
+    textAlign: 'center',
+    fontSize: '18px',
+    marginTop: '50px',
+    color: '#666666',
+  },
+  error: {
+    color: 'red',
+    textAlign: 'center',
+    marginTop: '20px',
+    fontSize: '14px',
   },
 };
 
