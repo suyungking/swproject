@@ -1,6 +1,7 @@
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 import logging
+from typing import List, Dict, Any
 from datetime import datetime, timedelta
 import difflib
 from data_fetcher import (
@@ -54,42 +55,49 @@ def parse_timetable(timetable):
         })
     return slots
 
+def format_timetable_slot(day, start, end):
+    # start와 end를 분 단위에서 시간 형식으로 변환
+    start_hour, start_minute = divmod(int(start), 60)
+    end_hour, end_minute = divmod(int(end), 60)
+    start_time = f"{start_hour:02d}:{start_minute:02d}"
+    end_time = f"{end_hour:02d}:{end_minute:02d}"
+    return f"{day} {start_time}~{end_time}"
+
 def period_to_time(period):
     hour = 9 + (period - 1) // 2
     minute = 0 if (period - 1) % 2 == 0 else 30
     return hour + minute / 60
 
 def is_time_conflict(timetable, new_course):
-    # new_course가 문자열인 경우 (시간표 문자열)
     if isinstance(new_course, str):
         new_course_times = parse_time(new_course)
-    # new_course가 딕셔너리인 경우 (과목 정보를 담은 딕셔너리)
     elif isinstance(new_course, dict):
         new_course_times = parse_time(new_course['시간표'])
     else:
-        # 예상치 못한 타입인 경우 로그 출력
         logger.error(f"Unexpected type for new_course: {type(new_course)}")
         return False
 
     for course in timetable:
         existing_times = parse_time(course['시간표'])
-        if any(new_time.overlaps(existing_time) for new_time in new_course_times for existing_time in existing_times):
-            return True
+        for new_time in new_course_times:
+            for existing_time in existing_times:
+                if new_time.overlaps(existing_time):
+                    return True
     return False
 
 def parse_time(time_str):
     times = []
     for time_slot in time_str.split('/'):
-        day, time_range = time_slot.strip('()').split()
-        start, end = map(float, time_range.split('~'))
+        day, time_range = time_slot.strip().strip('()').split()
+        start, end = map(lambda x: int(float(x) * 60), time_range.split('~'))
         times.append(TimeSlot(day, start, end))
     return times
 
 class TimeSlot:
     def __init__(self, day, start, end):
         self.day = day
-        self.start = start
-        self.end = end
+        self.start = start  # minutes since midnight
+        self.end = end  # minutes since midnight
 
     def overlaps(self, other):
         return self.day == other.day and max(self.start, other.start) < min(self.end, other.end)
@@ -98,7 +106,7 @@ def convert_time_to_minutes(time_str):
     hours, minutes = map(int, time_str.split(':'))
     return hours * 60 + minutes
 
-def calculate_remaining_credits(user_data, completed_credits):
+def calculate_remaining_credits(user_data, completed_credits, generated_credits):
     total_required = (
         user_data['basic_literacy'] +
         user_data['core_liberal_arts'] +
@@ -109,16 +117,31 @@ def calculate_remaining_credits(user_data, completed_credits):
     
     remaining_credits = {
         "basic_liberal_arts": {
-            "total": user_data['basic_literacy'] + user_data['basic_science'] - 
+            "total": max(0, user_data['basic_literacy'] + user_data['basic_science'] - 
                      (completed_credits.get('completed_basic_literacy', 0) + 
-                      completed_credits.get('completed_basic_science', 0)),
-            "basic_literacy": user_data['basic_literacy'] - completed_credits.get('completed_basic_literacy', 0),
-            "basic_science": user_data['basic_science'] - completed_credits.get('completed_basic_science', 0)
+                      completed_credits.get('completed_basic_science', 0) +
+                      generated_credits.get('basic_literacy', 0) +
+                      generated_credits.get('basic_science', 0))),
+            "basic_literacy": max(0, user_data['basic_literacy'] - 
+                                  (completed_credits.get('completed_basic_literacy', 0) +
+                                   generated_credits.get('basic_literacy', 0))),
+            "basic_science": max(0, user_data['basic_science'] - 
+                                 (completed_credits.get('completed_basic_science', 0) +
+                                  generated_credits.get('basic_science', 0)))
         },
-        "core_liberal_arts": user_data['core_liberal_arts'] - completed_credits.get('completed_core_liberal_arts', 0),
-        "required_major": user_data['required_major'] - completed_credits.get('completed_required_major', 0),
-        "elective_major": user_data['elective_major'] - completed_credits.get('completed_elective_major', 0),
-        "undefined": user_data['graduation_credits'] - total_required - (completed_credits.get('completed_elective_liberal_arts', 0) + completed_credits.get('completed_other', 0))
+        "core_liberal_arts": max(0, user_data['core_liberal_arts'] - 
+                                 (completed_credits.get('completed_core_liberal_arts', 0) +
+                                  generated_credits.get('core_liberal_arts', 0))),
+        "required_major": max(0, user_data['required_major'] - 
+                              (completed_credits.get('completed_required_major', 0) +
+                               generated_credits.get('required_major', 0))),
+        "elective_major": max(0, user_data['elective_major'] - 
+                              (completed_credits.get('completed_elective_major', 0) +
+                               generated_credits.get('elective_major', 0))),
+        "undefined": max(0, user_data['graduation_credits'] - total_required - 
+                         (completed_credits.get('completed_elective_liberal_arts', 0) +
+                          completed_credits.get('completed_other', 0) +
+                          generated_credits.get('undefined', 0)))
     }
     
     return remaining_credits
@@ -131,36 +154,49 @@ def calculate_course_priority(course, grade, remaining_credits, morning_afternoo
 
     # 과목 유형에 따른 우선순위 부여
     if course['이수구분'] == '전공필수' and course.get('트랙이수') == '트랙필수':
-        priority += 1000  # 전공필수 + 트랙필수 (최우선)
+        priority += 1500
     elif (course['이수구분'] == '전공선택' and course.get('트랙이수') == '트랙필수') or \
          (course['이수구분'] == '전공필수' and course.get('트랙이수') != '트랙필수'):
-        priority += 800   # 전공선택 + 트랙필수 또는 전공필수 + 트랙선택 (2순위)
+        priority += 1300
     elif course['이수구분'] == '전공선택' and course.get('트랙이수') != '트랙필수':
-        priority += 600   # 전공선택 + 트랙선택 (최하위)
+        priority += 1000
     elif course['이수구분'] == '핵심교양':
-        priority += 400   # 핵심교양 과목에 대한 우선순위
+        priority += 400
+    elif course['이수구분'] == '기초교양':
+        if course['영역'] == '기초문해교육':
+            priority += 250  # 기초문해교육의 우선순위를 높임
+        elif course['영역'] == '기초과학교육':
+            priority += 250  # 기초과학교육의 우선순위를 높임
+        else:
+            priority += 150  # 다른 기초교양 과목의 우선순위도 높임
 
-    # 학년에 따른 우선순위 조정
-    if course['학년'] == f"{grade}학년":
-        priority += 100
-    elif course['학년'] == '전학년':
-        priority += 50
+    # 학년에 따른 우선순위 조정 (기초교양 과목에 대해 저학년 우선)
+    if course['이수구분'] == '기초교양':
+        if grade <= 2:  # 1, 2학년
+            priority += 200
+        elif grade == 3:
+            priority += 100
+    else:
+        if course['학년'] == f"{grade}학년":
+            priority += 100
+        elif course['학년'] == '전학년':
+            priority += 50
 
-    # 남은 학점에 따른 가중치
+    # 남은 학점에 따른 고정 우선순위 부여
     course_type = course['이수구분']
     if course_type == '전공선택' and remaining_credits['elective_major'] > 0:
-        priority += min(40, remaining_credits['elective_major'] * 4)
+        priority += 40
     elif course_type == '핵심교양' and remaining_credits['core_liberal_arts'] > 0:
-        priority += min(30, remaining_credits['core_liberal_arts'] * 3)
+        priority += 30
     elif course_type == '기초교양':
         if course['영역'] == '기초문해교육' and remaining_credits['basic_liberal_arts']['basic_literacy'] > 0:
-            priority += min(35, remaining_credits['basic_liberal_arts']['basic_literacy'] * 3.5)
+            priority += 50
         elif course['영역'] == '기초과학교육' and remaining_credits['basic_liberal_arts']['basic_science'] > 0:
-            priority += min(35, remaining_credits['basic_liberal_arts']['basic_science'] * 3.5)
+            priority += 50
         elif remaining_credits['basic_liberal_arts']['total'] > 0:
-            priority += min(30, remaining_credits['basic_liberal_arts']['total'] * 3)
+            priority += 40
     elif remaining_credits['undefined'] > 0:
-        priority += min(20, remaining_credits['undefined'] * 2)
+        priority += 20
     
     # 이수구분에 따른 가중치
     if course['이수구분'] == '전공선택':
@@ -169,6 +205,8 @@ def calculate_course_priority(course, grade, remaining_credits, morning_afternoo
         priority += 100
     elif course['이수구분'] == '소양교양':
         priority += 50
+    elif course['이수구분'] == '기초교양':
+        priority += 150
     
     # 시간대에 따른 가중치
     time_slots = parse_timetable(course['시간표'])
@@ -194,6 +232,18 @@ def calculate_course_priority(course, grade, remaining_credits, morning_afternoo
     priority += int(course['학점']) * 10
     
     return priority
+
+def is_valid_course(course: Dict[str, Any], user_major: str) -> bool:
+    # 교양 과목은 항상 유효
+    if course['이수구분'] in ['기초교양', '핵심교양', '소양교양']:
+        return True
+    
+    # 사용자의 전공 과목이면 유효
+    if course['전공명'] == user_major:
+        return True
+    
+    # 그 외의 경우는 유효하지 않음
+    return False
 
 def resolve_schedule_conflicts(timetable, grade, remaining_credits, include_teacher_training, morning_afternoon, include_night, preferred_days):
     resolved_timetable = []
@@ -227,6 +277,23 @@ def resolve_schedule_conflicts(timetable, grade, remaining_credits, include_teac
 
     return resolved_timetable
 
+def calculate_course_similarity(course1, course2):
+    similarity = 0
+    if course1['이수구분'] == course2['이수구분']:
+        similarity += 3
+    if course1['학점'] == course2['학점']:
+        similarity += 2
+    if course1['전공명'] == course2['전공명']:
+        similarity += 2
+    if course1.get('영역') == course2.get('영역'):
+        similarity += 2
+    
+    # 과목명 유사도 계산
+    name_similarity = difflib.SequenceMatcher(None, course1['과목명'], course2['과목명']).ratio()
+    similarity += name_similarity * 3
+    
+    return similarity
+
 def find_similar_courses(course, all_courses, num_suggestions=3):
     logger.debug(f"{course['과목명']}과 유사한 과목을 찾는 중")
     course_name = course['과목명']
@@ -235,17 +302,20 @@ def find_similar_courses(course, all_courses, num_suggestions=3):
     logger.debug(f"{len(similar_courses)}개의 유사한 과목을 찾음")
     return similar_courses
 
-def find_alternative_courses(course, all_courses, timetable, max_alternatives=3):
-    logger.debug(f"{course['과목명']}의 대체 과목을 찾는 중")
-    similar_courses = find_similar_courses(course, all_courses)
+def find_alternative_courses(course, all_courses, final_timetable, user_major, max_alternatives=6):
     alternatives = []
-    for alt_course in similar_courses:
-        if not is_time_conflict(timetable, alt_course):
-            alternatives.append(alt_course)
-            if len(alternatives) >= max_alternatives:
-                break
-    logger.debug(f"{len(alternatives)}개의 대체 과목을 찾음")
-    return alternatives
+    for alt_course in all_courses:
+        if alt_course not in final_timetable and alt_course['과목명'] != course['과목명']:
+            if (alt_course['전공명'] == user_major and course['전공명'] == user_major) or \
+               (alt_course['이수구분'] == course['이수구분'] and alt_course['이수구분'] in ['기초교양', '핵심교양']):
+                if not is_time_conflict(final_timetable, alt_course):
+                    alternatives.append(alt_course)
+    
+    # 유사도에 따라 대체 과목 정렬
+    alternatives.sort(key=lambda x: calculate_course_similarity(course, x), reverse=True)
+    
+    # 최대 max_alternatives개까지만 반환
+    return alternatives[:max_alternatives]
 
 def is_course_in_preferred_time(course, morning_afternoon, include_night):
     course_times = course['시간표'].split('/')
@@ -265,94 +335,143 @@ def is_course_in_preferred_time(course, morning_afternoon, include_night):
     
     return False
 
-def evaluate_timetable(timetable, total_credits, average_priority):
+def evaluate_timetable(timetable, total_credits, average_priority, preferred_days, morning_afternoon, include_night):
     score = 0
     
-    # 총 학점에 대한 점수
     if total_credits >= 15 and total_credits <= 18:
         score += 100
     elif total_credits >= 12:
         score += 50
     
-    # 평균 우선순위에 대한 점수
     score += average_priority * 10
     
-    # 과목 다양성 점수
     course_types = set(course['이수구분'] for course in timetable)
     score += len(course_types) * 20
     
-    # 트랙필수 과목 포함 여부 점수
     if any(course.get('트랙이수') == '트랙필수' for course in timetable):
         score += 50
     
-    # 시간 분포 점수
-    days_with_classes = set(day for course in timetable for day in course['시간표'].split('/')[0].strip('()'))
+    days_with_classes = set()
+    for course in timetable:
+        time_slots = course['시간표'].split('/')
+        for slot in time_slots:
+            day = slot.strip().split()[0].strip('()')
+            days_with_classes.add(day)
     score += len(days_with_classes) * 10
+
+    # 선호 요일 및 시간대에 대한 평가
+    for course in timetable:
+        time_slots = course['시간표'].split('/')
+        for slot in time_slots:
+            parts = slot.strip().split()
+            if len(parts) >= 2:
+                day = parts[0].strip('()')
+                time_range = parts[1].split('~')
+                if len(time_range) >= 1:
+                    start_time = time_range[0]
+                    start_hour = int(start_time.split(':')[0]) if ':' in start_time else int(float(start_time))
+
+                    if day in preferred_days:
+                        score += 20
+
+                    if morning_afternoon == 'morning' and start_hour < 12:
+                        score += 15
+                    elif morning_afternoon == 'afternoon' and 12 <= start_hour < 18:
+                        score += 15
+                    elif morning_afternoon == 'evening' and start_hour >= 18 and include_night:
+                        score += 15
+                    elif morning_afternoon == 'all':
+                        if start_hour < 18:
+                            score += 10
+                        elif start_hour >= 18 and include_night:
+                            score += 5
     
     return score
 
-def generate_initial_timetable(all_courses, grade, remaining_credits, max_credits, preferred_days, morning_afternoon, include_night):
+def generate_initial_timetable(all_courses: List[Dict[str, Any]], grade: int, remaining_credits: Dict[str, Any], max_credits: int, preferred_days: List[str], morning_afternoon: str, include_night: bool, user_major: str) -> tuple:
     logger.debug("초기 시간표를 생성하는 중")
     
     if not all_courses:
         logger.warning("과목 목록이 비어 있습니다.")
         return [], 0, 0
     
-    # 모든 과목에 대해 우선순위 계산
-    prioritized_courses = [(course, calculate_course_priority(course, grade, remaining_credits, morning_afternoon, include_night, preferred_days)) for course in all_courses]
-    
-    # 우선순위에 약간의 무작위성 추가
-    prioritized_courses = [(course, priority + random.uniform(0, 10)) for course, priority in prioritized_courses]
-
-    # 우선순위에 따라 정렬
-    prioritized_courses.sort(key=lambda x: x[1], reverse=True)
-    
     initial_timetable = []
     current_credits = 0
     total_priority = 0
-    selected_course_names = set()  # 선택된 과목명을 추적하기 위한 집합
-    
+    selected_course_names = set()  # 이미 선택된 과목명을 저장하는 집합
+    selected_core_liberal_arts_areas = set()  # 이미 선택된 핵심교양 영역을 저장하는 집합
 
     def add_course(course, priority):
-        nonlocal current_credits, total_priority
+        nonlocal current_credits, total_priority, remaining_credits
+        
+        # 과목 중복 검사: 이미 선택된 과목이면 추가하지 않음
+        if course['과목명'] in selected_course_names:
+            logger.debug(f"중복 과목 무시됨: {course['과목명']}")
+            return False
+        
         initial_timetable.append(course)
-        current_credits += int(course['학점'])
+        course_credits = int(course['학점'])
+        current_credits += course_credits
         total_priority += priority
         selected_course_names.add(course['과목명'])
+        
+        if course['이수구분'] == '핵심교양':
+            selected_core_liberal_arts_areas.add(course['영역'])
+        
+        # 남은 학점 업데이트
+        if course['이수구분'] == '전공필수':
+            remaining_credits['required_major'] = max(0, remaining_credits['required_major'] - course_credits)
+        elif course['이수구분'] == '전공선택':
+            remaining_credits['elective_major'] = max(0, remaining_credits['elective_major'] - course_credits)
+        elif course['이수구분'] == '핵심교양':
+            remaining_credits['core_liberal_arts'] = max(0, remaining_credits['core_liberal_arts'] - course_credits)
+        elif course['이수구분'] == '기초교양':
+            if course['영역'] == '기초문해교육':
+                remaining_credits['basic_liberal_arts']['basic_literacy'] = max(0, remaining_credits['basic_liberal_arts']['basic_literacy'] - course_credits)
+            elif course['영역'] == '기초과학교육':
+                remaining_credits['basic_liberal_arts']['basic_science'] = max(0, remaining_credits['basic_liberal_arts']['basic_science'] - course_credits)
+            remaining_credits['basic_liberal_arts']['total'] = max(0, remaining_credits['basic_liberal_arts']['total'] - course_credits)
+        else:
+            remaining_credits['undefined'] = max(0, remaining_credits['undefined'] - course_credits)
+        
+        logger.debug(f"과목 추가됨: {course['과목명']}")
+        return True
 
-    # 트랙필수 과목 먼저 추가
-    for course, priority in prioritized_courses[:]:
-        if course.get('트랙이수') == '트랙필수' and current_credits + int(course['학점']) <= max_credits:
-            if not is_time_conflict(initial_timetable, course) and course['과목명'] not in selected_course_names:
-                add_course(course, priority)
-                prioritized_courses.remove((course, priority))
+    # 모든 과목에 대해 우선순위 계산
+    all_prioritized_courses = [(course, calculate_course_priority(course, grade, remaining_credits, morning_afternoon, include_night, preferred_days)) 
+                               for course in all_courses if is_valid_course(course, user_major)]
     
-    # 나머지 과목 추가
-    while current_credits < max_credits and prioritized_courses:
-        # 상위 5개 (또는 남은 과목 수) 중에서 무작위로 선택
-        top_courses = prioritized_courses[:min(5, len(prioritized_courses))]
-        course, priority = random.choice(top_courses)
-        course_credits = int(course['학점'])
+    # 우선순위에 따라 정렬
+    all_prioritized_courses.sort(key=lambda x: x[1], reverse=True)
+
+    # 과목 추가 로직
+    for course, priority in all_prioritized_courses:
+        if current_credits + int(course['학점']) > max_credits:
+            break  # 최대 학점을 초과하면 더 이상 과목을 추가하지 않음
         
-        if current_credits + course_credits > max_credits:
-            prioritized_courses.remove((course, priority))
+        # 시간표 형식 확인 및 변환
+        if '시간표' in course and isinstance(course['시간표'], str):
+            course_time = course['시간표']
+        else:
+            logger.warning(f"과목 {course['과목명']}의 시간표 형식이 올바르지 않습니다.")
             continue
-        
-        if is_time_conflict(initial_timetable, course):
-            prioritized_courses.remove((course, priority))
-            continue
+
+        if is_time_conflict(initial_timetable, course_time):
+            continue  # 시간 충돌이 있으면 다음 과목으로 넘어감
         
         if course['과목명'] in selected_course_names:
-            prioritized_courses.remove((course, priority))
-            continue            
+            continue  # 이미 선택된 과목이면 다음 과목으로 넘어감
+        
+        if course['이수구분'] == '핵심교양' and course['영역'] in selected_core_liberal_arts_areas:
+            continue  # 이미 선택된 핵심교양 영역이면 다음 과목으로 넘어감
 
         add_course(course, priority)
-        prioritized_courses.remove((course, priority))
-    
+
     average_priority = total_priority / len(initial_timetable) if initial_timetable else 0
     
     logger.debug(f"초기 시간표 생성 완료: {len(initial_timetable)}개 과목, 총 {current_credits}학점, 평균 우선순위: {average_priority:.2f}")
     return initial_timetable, current_credits, average_priority
+    
 
 def generate_timetable(user_id, dynamic_data):
     logger.debug(f"사용자 {user_id}의 시간표 생성 시작")
@@ -375,55 +494,64 @@ def generate_timetable(user_id, dynamic_data):
     include_advisory = dynamic_data['include_advisory']
 
     completed_credits = dynamic_data.get('completed_credits', {})
-    remaining_credits = calculate_remaining_credits(user_data, completed_credits)
-    logger.debug(f"남은 학점: {remaining_credits}")
+    remaining_credits = calculate_remaining_credits(user_data, completed_credits, {})
+    logger.debug(f"초기 남은 학점: {remaining_credits}")
 
     # 과목 데이터 가져오기
     advisory_course = fetch_advisory_course(user_data['major']) if include_advisory else []
     required_courses = fetch_uncompleted_required_courses(user_data['major'], grade)
     elective_courses = fetch_appropriate_electives(user_data['major'], grade)
     liberal_arts_courses = fetch_appropriate_liberal_arts(
-    selected_areas,
-    include_elective_liberal_arts,
-    preferred_days,
-    morning_afternoon,
-    include_night
+        selected_areas,
+        include_elective_liberal_arts,
+        preferred_days,
+        morning_afternoon,
+        include_night
     )
-    # 트랙필수 과목 필터링
-    track_required_courses = [course for course in elective_courses if course['트랙이수'] == '트랙필수']
     
-    # 트랙필수 과목을 required_courses에 추가
+    # 트랙필수 과목 필터링 및 처리
+    track_required_courses = [course for course in elective_courses if course.get('트랙이수') == '트랙필수']
     required_courses += track_required_courses
-    
-    # 트랙필수가 아닌 전공선택 과목만 남김
     elective_courses = [course for course in elective_courses if course.get('트랙이수') != '트랙필수']
-
 
     logger.debug(f"상담 과목: {advisory_course}")
     logger.debug(f"필수 과목: {required_courses}")
     logger.debug(f"선택 과목: {elective_courses}")
     logger.debug(f"교양 과목: {liberal_arts_courses}")
     
-
-    all_courses = required_courses + elective_courses + liberal_arts_courses
+    all_courses = required_courses + elective_courses + liberal_arts_courses + advisory_course
     logger.debug(f"총 {len(all_courses)}개의 과목을 가져옴")
     
-
     best_timetable = None
     best_score = 0
-    attempts = 20  # 시도 횟수 증가
+    best_remaining_credits = None
+    attempts = 30  # 시도 횟수 증가
 
     for _ in range(attempts):
         initial_timetable, total_credits, average_priority = generate_initial_timetable(
-            all_courses, grade, remaining_credits, max_credits, preferred_days, morning_afternoon, include_night
+            all_courses, grade, remaining_credits, max_credits, preferred_days, morning_afternoon, include_night, user_data['major']
         )
         
-        # 시간표 평가 (예: 총 학점, 평균 우선순위, 트랙필수 과목 포함 여부 등을 고려)
-        score = evaluate_timetable(initial_timetable, total_credits, average_priority)
+        # 생성된 시간표의 학점 계산
+        generated_credits = {
+            'basic_literacy': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] == '기초교양' and course['영역'] == '기초문해교육'),
+            'basic_science': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] == '기초교양' and course['영역'] == '기초과학교육'),
+            'core_liberal_arts': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] == '핵심교양'),
+            'required_major': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] == '전공필수'),
+            'elective_major': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] == '전공선택'),
+            'undefined': sum(int(course['학점']) for course in initial_timetable if course['이수구분'] not in ['기초교양', '핵심교양', '전공필수', '전공선택'])
+        }
         
-        if score > best_score:
+        # 남은 학점 재계산
+        current_remaining_credits = calculate_remaining_credits(user_data, completed_credits, generated_credits)
+        
+        # 시간표 평가
+        score = evaluate_timetable(initial_timetable, total_credits, average_priority, preferred_days, morning_afternoon, include_night)
+        
+        if score > best_score or (score == best_score and total_credits > sum(int(course['학점']) for course in best_timetable or [])):
             best_timetable = initial_timetable
             best_score = score
+            best_remaining_credits = current_remaining_credits
 
     if not best_timetable:
         logger.warning("시간표 생성에 실패했습니다.")
@@ -431,14 +559,25 @@ def generate_timetable(user_id, dynamic_data):
 
     final_timetable = best_timetable
 
-    # 대체 과목 찾기
+    ## 대체 과목 찾기
     all_courses = fetch_all_courses()
     alternative_courses = {}
-    for course in initial_timetable:
-        if course not in final_timetable:
-            alternatives = find_alternative_courses(course, all_courses, final_timetable)
+    for course in final_timetable:
+        if course['이수구분'] in ['기초교양', '핵심교양']:  # 교양 과목에 대해서만 대체 과목 찾기
+            alternatives = find_alternative_courses(course, all_courses, final_timetable, user_data['major'])
             if alternatives:
-                alternative_courses[course['과목명']] = alternatives
+                alternative_courses[course['과목명']] = [
+                    {
+                        "name": alt['과목명'],
+                        "time_slots": alt['시간표'],  # 원래 형식 그대로 유지
+                        "professor": alt['교수명'],
+                        "credits": alt['학점'],
+                        "course_type": alt['이수구분'],
+                        "track_required": alt.get('트랙이수') == '트랙필수'
+                    } for alt in alternatives[:3]  # 최대 6개로 제한
+                ]
+
+    logger.debug(f"대체 과목 구조: {alternative_courses}")
 
     total_credits = sum(int(course['학점']) for course in final_timetable if course['이수구분'] != '비교과')
 
@@ -448,29 +587,16 @@ def generate_timetable(user_id, dynamic_data):
         "timetable": [
             {
                 "name": course['과목명'],
-                "day": course['시간표'].split(' ')[0],
-                "start_time": course['시간표'].split(' ')[1].split('~')[0],
-                "end_time": course['시간표'].split(' ')[1].split('~')[1],
+                "time_slots": course['시간표'],  # 원래 형식 그대로 유지
                 "professor": course['교수명'],
                 "credits": course['학점'],
-                "course_type": course['이수구분']
+                "course_type": course['이수구분'],
+                "track_required": course.get('트랙이수') == '트랙필수'
             } for course in final_timetable
         ],
-        "remaining_credits": remaining_credits,
+        "remaining_credits": best_remaining_credits,
         "total_credits": total_credits,
-        "alternative_courses": {
-            course: [
-                {
-                    "name": alt['과목명'],
-                    "day": alt['시간표'].split(' ')[0],
-                    "start_time": alt['시간표'].split(' ')[1].split('~')[0],
-                    "end_time": alt['시간표'].split(' ')[1].split('~')[1],
-                    "professor": alt['교수명'],
-                    "credits": alt['학점'],
-                    "course_type": alt['이수구분']
-                } for alt in alternatives
-            ] for course, alternatives in alternative_courses.items()
-        }
+        "alternative_courses": alternative_courses
     }
     logger.debug(f"최종 결과: {result}")
     return result
