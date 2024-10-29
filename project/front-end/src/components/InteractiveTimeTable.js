@@ -1,11 +1,13 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
+import axios from 'axios';
 
 const InteractiveTimeTable = () => {
   const [timetableData, setTimetableData] = useState(null);
   const [remainingCredits, setRemainingCredits] = useState(null);
   const [totalCredits, setTotalCredits] = useState(null);
   const [alternativeCourses, setAlternativeCourses] = useState(null);
+  const [saveStatus, setSaveStatus] = useState(null);
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -23,78 +25,88 @@ const InteractiveTimeTable = () => {
     }
   }, [location, navigate]);
 
-  const timeSlots = [
-    { period: 1, start: '09:00', end: '09:50' },
-    { period: 2, start: '10:00', end: '10:50' },
-    { period: 3, start: '11:00', end: '11:50' },
-    { period: 4, start: '12:00', end: '12:50' },
-    { period: 5, start: '13:00', end: '13:50' },
-    { period: 6, start: '14:00', end: '14:50' },
-    { period: 7, start: '15:00', end: '15:50' },
-    { period: 8, start: '16:00', end: '16:50' },
-    { period: 9, start: '17:00', end: '17:50' },
-    { period: 10, start: '18:00', end: '18:45' },
-    { period: 11, start: '18:45', end: '19:30' },
-    { period: 12, start: '19:35', end: '20:20' },
-    { period: 13, start: '20:20', end: '21:05' },
-    { period: 14, start: '21:10', end: '21:55' },
-    { period: 15, start: '21:55', end: '22:40' }
-  ];
+  const days = ['교시', '월', '화', '수', '목', '금'];
+  const periods = useMemo(() => Array.from({ length: 15 }, (_, i) => i + 1), []);
 
-  const days = ['월', '화', '수', '목', '금'];
+  const getRandomColor = () => {
+    const colors = ['#FFB3BA', '#BAFFC9', '#BAE1FF', '#FFFFBA', '#FFDFBA'];
+    return colors[Math.floor(Math.random() * colors.length)];
+  };
+
+  const parseTimeSlots = (timeSlots) => {
+    if (typeof timeSlots !== 'string') {
+      console.error('Invalid timeSlots:', timeSlots);
+      return [];
+    }
+    return timeSlots.split('/').map(slot => {
+      const [day, period] = slot.trim().split(')');
+      const [start, end] = period.trim().split('~').map(Number);
+      return {
+        day: day.replace('(', '').trim(),
+        start,
+        end
+      };
+    });
+  };
 
   const renderTimetable = () => {
     if (!timetableData || !Array.isArray(timetableData) || timetableData.length === 0) {
       return <p style={styles.error}>시간표 데이터가 없거나 올바르지 않습니다.</p>;
     }
-  
-    const maxEndTime = Math.max(...timetableData.map(course => parseFloat(course.end_time)));
-    const displayedTimeSlots = timeSlots.filter(slot => slot.period <= Math.ceil(maxEndTime));
-    const headerCellHeight = 40; // 요일 헤더 셀의 높이
-  
+
+    const courseColors = {};
+
     return (
       <div style={styles.timetableContainer}>
-        <div style={styles.timeColumn}>
-          <div style={styles.headerCell}>교시</div>
-          {displayedTimeSlots.map((slot) => (
-            <div key={slot.period} style={styles.timeSlot}>
-              <div>{slot.period}</div>
-              <div style={styles.timeInfo}>{slot.start}</div>
-            </div>
-          ))}
-        </div>
-        {days.map((day) => (
-          <div key={day} style={styles.dayColumn}>
-            <div style={styles.headerCell}>{day}</div>
-            {timetableData
-              .filter(course => course.day === `(${day})`)
-              .map((course, index) => {
-                const startSlot = Math.floor(parseFloat(course.start_time)) - 1;
-                const endSlot = Math.floor(parseFloat(course.end_time)) - 1;
-                const isHalfStart = parseFloat(course.start_time) % 1 !== 0;
-                const isHalfEnd = parseFloat(course.end_time) % 1 !== 0;
-  
-                // 요일 헤더 셀 높이를 고려하여 각 과목의 위치를 조정
-                const top = headerCellHeight + startSlot * 40 + (isHalfStart ? 20 : 0);
-                const height = Math.max((endSlot - startSlot) * 40 + (isHalfEnd ? 20 : 40), 40);
-  
-                return (
-                  <div
-                    key={index}
-                    style={{
-                      ...styles.courseCell,
-                      top: `${top}px`, // top 위치 조정
-                      height: `${height}px`, // height 설정
-                      backgroundColor: getRandomColor(),
-                    }}
-                  >
-                    <div style={styles.courseName}>{course.name}</div>
-                    <div style={styles.courseInfo}>{course.professor}</div>
-                  </div>
-                );
-              })}
-          </div>
-        ))}
+        <table style={styles.timetable}>
+          <thead>
+            <tr>
+              {days.map(day => (
+                <th key={day} style={styles.headerCell}>{day}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {periods.map(period => (
+              <tr key={period}>
+                <td style={styles.timeCell}>{period}</td>
+                {days.slice(1).map(day => (
+                  <td key={`${day}-${period}`} style={styles.dayCell}>
+                    {timetableData.map((course, index) => {
+                      const slots = parseTimeSlots(course.time_slots);
+                      const relevantSlot = slots.find(slot => 
+                        slot.day === day && period >= slot.start && period < slot.end
+                      );
+
+                      if (!relevantSlot) return null;
+
+                      if (!courseColors[course.name]) {
+                        courseColors[course.name] = getRandomColor();
+                      }
+
+                      const top = (relevantSlot.start - period) * 40;
+                      const height = (relevantSlot.end - relevantSlot.start) * 40;
+
+                      return (
+                        <div
+                          key={`${index}-${day}-${period}`}
+                          style={{
+                            ...styles.courseCell,
+                            backgroundColor: courseColors[course.name],
+                            top: `${top}px`,
+                            height: `${height}px`,
+                          }}
+                        >
+                          <div style={styles.courseName}>{course.name}</div>
+                        </div>
+                      );
+                    })}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     );
   };
@@ -108,7 +120,12 @@ const InteractiveTimeTable = () => {
       <ul style={styles.courseList}>
         {timetableData.map((course, index) => (
           <li key={index} style={styles.courseItem}>
-            {course.name} - {course.day} {course.start_time}~{course.end_time}
+            <div style={styles.courseItemName}>{course.name}</div>
+            <div>교수: {course.professor}</div>
+            <div>시간: {course.time_slots}</div>
+            <div>학점: {course.credits}</div>
+            <div>이수구분: {course.course_type}</div>
+            {course.track_required && <div>트랙필수</div>}
           </li>
         ))}
       </ul>
@@ -123,11 +140,12 @@ const InteractiveTimeTable = () => {
     return (
       <div style={styles.creditsInfo}>
         <h3>남은 학점</h3>
-        <p>기초문해: {remainingCredits.basic_literacy}</p>
+        <p>기초문해: {remainingCredits.basic_liberal_arts.basic_literacy}</p>
         <p>핵심교양: {remainingCredits.core_liberal_arts}</p>
-        <p>기초과학: {remainingCredits.basic_science}</p>
+        <p>기초과학: {remainingCredits.basic_liberal_arts.basic_science}</p>
         <p>전공필수: {remainingCredits.required_major}</p>
         <p>전공선택: {remainingCredits.elective_major}</p>
+        <p>기타: {remainingCredits.undefined}</p>
       </div>
     );
   };
@@ -136,7 +154,7 @@ const InteractiveTimeTable = () => {
     if (!alternativeCourses) {
       return null;
     }
-
+  
     return (
       <div style={styles.alternativeCourses}>
         <h3>대체 과목</h3>
@@ -146,7 +164,7 @@ const InteractiveTimeTable = () => {
             <ul>
               {alternatives.map((alt, index) => (
                 <li key={index}>
-                  {alt.name} - {alt.day} {alt.start_time}~{alt.end_time} (교수: {alt.professor}, 학점: {alt.credits})
+                  {alt.name} - {alt.time_slots} (교수: {alt.professor}, 학점: {alt.credits})
                 </li>
               ))}
             </ul>
@@ -156,10 +174,35 @@ const InteractiveTimeTable = () => {
     );
   };
 
-  const getRandomColor = () => {
-    const colors = ['#FFE6E6', '#E6F3FF', '#E6FFE6', '#FFE6F3', '#E6FFFF', '#FFF3E6'];
-    return colors[Math.floor(Math.random() * colors.length)];
+  const saveTimetable = async () => {
+    try {
+      const userId = localStorage.getItem('userId');
+      
+      if (!userId) {
+        console.error('사용자 ID를 찾을 수 없습니다.');
+        setSaveStatus('사용자 ID를 찾을 수 없습니다. 다시 로그인해주세요.');
+        return;
+      }
+
+      const response = await axios.post('/api/save-timetable', {
+        userId,
+        timetableData,
+        remainingCredits,
+        totalCredits,
+        alternativeCourses
+      });
+
+      if (response.data.success) {
+        setSaveStatus('시간표가 성공적으로 저장되었습니다.');
+      } else {
+        setSaveStatus('시간표 저장에 실패했습니다: ' + response.data.message);
+      }
+    } catch (error) {
+      console.error('시간표 저장 중 오류 발생:', error);
+      setSaveStatus('시간표 저장 중 오류가 발생했습니다. 다시 시도해주세요.');
+    }
   };
+
 
   if (!timetableData) {
     return <div style={styles.loadingMessage}>로딩 중...</div>;
@@ -178,10 +221,14 @@ const InteractiveTimeTable = () => {
         <button onClick={() => navigate('/main')} style={styles.button}>
           메인 페이지로 돌아가기
         </button>
-        <button onClick={() => navigate('/generate-timetable')} style={styles.button}>
+        <button onClick={() => navigate('/timetable-generator')} style={styles.button}>
           시간표 다시 생성하기
         </button>
+        <button onClick={saveTimetable} style={styles.button}>
+          시간표 저장하기
+        </button>
       </div>
+      {saveStatus && <p style={styles.saveStatus}>{saveStatus}</p>}
     </div>
   );
 };
@@ -191,7 +238,7 @@ const styles = {
     padding: '20px',
     maxWidth: '1000px',
     margin: '0 auto',
-    backgroundColor: '#f5f5f5',
+    backgroundColor: '#ffffff',
     color: '#333333',
     fontFamily: 'Arial, sans-serif',
   },
@@ -210,69 +257,71 @@ const styles = {
     color: '#333333',
   },
   timetableContainer: {
-    display: 'flex',
-    border: '1px solid #e0e0e0',
+    overflowX: 'auto',
+    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
     borderRadius: '8px',
-    overflow: 'hidden',
+  },
+  timetable: {
+    width: '100%',
+    borderCollapse: 'collapse',
     backgroundColor: '#ffffff',
-  },
-  timeColumn: {
-    width: '80px',
-    borderRight: '1px solid #e0e0e0',
-  },
-  dayColumn: {
-    flex: 1,
-    position: 'relative',
-    borderRight: '1px solid #e0e0e0',
-    minHeight: '600px',
   },
   headerCell: {
     padding: '10px',
     textAlign: 'center',
     fontWeight: 'bold',
-    backgroundColor: '#333333',
-    color: '#ffffff',
-    borderBottom: '1px solid #e0e0e0',
-    height: '20px',
+    backgroundColor: '#f0f0f0',
+    color: '#333333',
+    border: '1px solid #e0e0e0',
   },
-  timeSlot: {
+  timeCell: {
+    width: '60px',
+    textAlign: 'center',
+    border: '1px solid #e0e0e0',
+    backgroundColor: '#f0f0f0',
+    fontWeight: 'bold',
+  },
+  dayCell: {
+    width: '18%',
     height: '40px',
-    borderBottom: '1px solid #eeeeee',
-    display: 'flex',
-    flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    fontSize: '12px',
-    color: '#666666',
-  },
-  timeInfo: {
-    fontSize: '10px',
-    color: '#666666',
+    border: '1px solid #e0e0e0',
+    position: 'relative',
+    padding: 0,
   },
   courseCell: {
     position: 'absolute',
     left: '1px',
     right: '1px',
-    padding: '5px',
+    padding: '2px',
     fontSize: '12px',
-    border: '1px solid #e0e0e0',
     overflow: 'hidden',
     display: 'flex',
-    flexDirection: 'column',
+    alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: '#fafafa',
     color: '#333333',
     borderRadius: '4px',
-    boxShadow: '0 4px 6px rgba(0, 0, 0, 0.1)',
+    boxShadow: '0 1px 2px rgba(0, 0, 0, 0.1)',
+    zIndex: 1,
   },
   courseName: {
     fontWeight: 'bold',
-    marginBottom: '2px',
-    color: '#222222',
+    textAlign: 'center',
   },
-  courseInfo: {
-    fontSize: '10px',
-    color: '#555555',
+  courseList: {
+    listStyle: 'none',
+    padding: 0,
+    margin: '20px 0',
+  },
+  courseItem: {
+    backgroundColor: '#f9f9f9',
+    padding: '10px',
+    marginBottom: '10px',
+    borderRadius: '4px',
+    boxShadow: '0 1px 3px rgba(0, 0, 0, 0.1)',
+  },
+  courseItemName: {
+    fontWeight: 'bold',
+    marginBottom: '5px',
   },
   creditsInfo: {
     marginTop: '30px',
@@ -302,7 +351,7 @@ const styles = {
   },
   button: {
     padding: '10px 20px',
-    backgroundColor: '#333333',
+    backgroundColor: '#4a90e2',
     color: '#ffffff',
     border: 'none',
     borderRadius: '5px',
@@ -321,6 +370,12 @@ const styles = {
     textAlign: 'center',
     marginTop: '20px',
     fontSize: '14px',
+  },
+  saveStatus: {
+    marginTop: '20px',
+    textAlign: 'center',
+    fontWeight: 'bold',
+    color: '#4a90e2',
   },
 };
 

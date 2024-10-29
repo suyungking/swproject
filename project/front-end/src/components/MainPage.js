@@ -194,7 +194,7 @@ export default function MainPage() {
             <p style={commonStyles.userEmail}>{userData.email || '이메일 없음'}</p>
           </div>
         </div>
-        <Link to="/timetable" style={commonStyles.button}>
+        <Link to="/saved-timetables" style={commonStyles.button}>
           내 시간표 보기
         </Link>
         <Link to="/timetable-generator" style={{...commonStyles.button, ...commonStyles.secondaryButton}}>

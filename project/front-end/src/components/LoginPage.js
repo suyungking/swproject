@@ -82,6 +82,8 @@ export default function LoginPage() {
       const userData = await login(email, password);
       console.log('Login response:', userData);
       if (userData.id || userData.userId) {
+        const userId = userData.id || userData.userId;
+        localStorage.setItem('userId', userId.toString());
         localStorage.setItem('user', JSON.stringify({
           ...userData,
           id: userData.id || userData.userId

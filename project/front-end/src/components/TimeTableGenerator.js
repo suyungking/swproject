@@ -222,6 +222,7 @@ const TimeTableGenerator = () => {
             timetable: result.timetable,
             remainingCredits: result.remaining_credits,
             totalCredits: result.total_credits,
+            graduationCredits: result.graduation_credits,
             alternativeCourses: result.alternative_courses
           }
         });
