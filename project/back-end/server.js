@@ -12,6 +12,7 @@ import path from 'path';
 
 const app = express();
 app.use(express.json());
+
 app.use(cors({
   origin: 'http://localhost:3000',
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
@@ -32,14 +33,20 @@ const __dirname = dirname(__filename);
 // userAuth 라우트에 데이터베이스 연결 전달
 app.use('/api/auth', userAuthRoutes(db));
 
-// 사용자의 시간표 목록 조회
-app.get('/api/timetables/:userId', async (req, res) => {
+app.delete('/api/timetables/:timetableId', async (req, res) => {
+  const { timetableId } = req.params;
+
   try {
-    const [timetables] = await db.query('SELECT * FROM timetables WHERE user_id = ?', [req.params.userId]);
-    res.json(timetables);
+    const [result] = await db.query('DELETE FROM saved_timetables WHERE id = ?', [timetableId]);
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: '삭제할 시간표를 찾을 수 없습니다.' });
+    }
+
+    res.json({ success: true, message: '시간표가 성공적으로 삭제되었습니다.' });
   } catch (error) {
-    console.error('시간표 목록 조회 오류:', error);
-    res.status(500).json({ message: '서버 오류가 발생했습니다.', error: error.message });
+    console.error('시간표 삭제 중 오류 발생:', error);
+    res.status(500).json({ success: false, message: '시간표 삭제에 실패했습니다.', error: error.message });
   }
 });
 
@@ -53,6 +60,28 @@ app.get('/api/courses/:timetableId', async (req, res) => {
     res.status(500).json({ message: '서버 오류가 발생했습니다.', error: error.message });
   }
 });
+
+app.put('/api/users/:id', async (req, res) => {
+  const { id } = req.params;
+  const { major, basic_literacy, core_liberal_arts, basic_science, required_major, elective_major, graduation_credits } = req.body;
+
+  try {
+    const [result] = await db.query(
+      'UPDATE users SET major = ?, basic_literacy = ?, core_liberal_arts = ?, basic_science = ?, required_major = ?, elective_major = ?, graduation_credits = ? WHERE id = ?',
+      [major, basic_literacy, core_liberal_arts, basic_science, required_major, elective_major, graduation_credits, id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ success: false, message: '사용자를 찾을 수 없습니다.' });
+    }
+
+    res.json({ success: true, message: '사용자 정보가 성공적으로 업데이트되었습니다.' });
+  } catch (error) {
+    console.error('사용자 정보 업데이트 오류:', error);
+    res.status(500).json({ success: false, message: '서버 오류가 발생했습니다.', error: error.message });
+  }
+});
+
 
 // 사용자 정보 조회 (학점 정보 포함)
 app.get('/api/user/:userId', async (req, res) => {
@@ -111,7 +140,82 @@ app.post('/api/generate-timetable', async (req, res) => {
   }
 });
 
+app.post('/api/save-timetable', async (req, res) => {
+  const { userId, timetableData, remainingCredits, totalCredits, alternativeCourses } = req.body;
 
+  if (!userId) {
+    return res.status(400).json({ success: false, message: '사용자 ID가 제공되지 않았습니다.' });
+  }
+
+  try {
+    const connection = await db.getConnection();
+    
+    try {
+      await connection.beginTransaction();
+
+      const [result] = await connection.query(
+        'INSERT INTO saved_timetables (user_id, timetable_data, remaining_credits, total_credits, alternative_courses) VALUES (?, ?, ?, ?, ?)',
+        [userId, JSON.stringify(timetableData), JSON.stringify(remainingCredits), totalCredits, JSON.stringify(alternativeCourses)]
+      );
+
+      await connection.commit();
+
+      res.json({ success: true, message: '시간표가 성공적으로 저장되었습니다.', timetableId: result.insertId });
+    } catch (error) {
+      await connection.rollback();
+      throw error;
+    } finally {
+      connection.release();
+    }
+  } catch (error) {
+    console.error('시간표 저장 중 오류 발생:', error);
+    res.status(500).json({ success: false, message: '시간표 저장에 실패했습니다.', error: error.message });
+  }
+});
+
+
+// 사용자의 시간표 목록 조회
+app.get('/api/timetables/:userId', async (req, res) => {
+  try {
+    const userId = req.params.userId;
+    console.log('요청된 사용자 ID:', userId);
+
+    const [timetables] = await db.query(
+      'SELECT * FROM saved_timetables WHERE user_id = ?',
+      [userId]
+    );
+    
+    console.log('데이터베이스 쿼리 결과:', JSON.stringify(timetables, null, 2));
+
+    if (timetables.length === 0) {
+      console.log('사용자의 저장된 시간표가 없습니다.');
+      return res.json([]);
+    }
+
+    const formattedTimetables = timetables.map(timetable => {
+      try {
+        return {
+          id: timetable.id,
+          name: `시간표 ${timetable.id}`,
+          created_at: timetable.created_at,
+          courses: Array.isArray(timetable.timetable_data) ? timetable.timetable_data : JSON.parse(timetable.timetable_data),
+          remainingCredits: typeof timetable.remaining_credits === 'object' ? timetable.remaining_credits : JSON.parse(timetable.remaining_credits),
+          totalCredits: timetable.total_credits,
+          alternativeCourses: timetable.alternative_courses ? (typeof timetable.alternative_courses === 'object' ? timetable.alternative_courses : JSON.parse(timetable.alternative_courses)) : null
+        };
+      } catch (error) {
+        console.error('시간표 데이터 파싱 오류:', error, 'Raw data:', timetable.timetable_data);
+        return null;
+      }
+    }).filter(timetable => timetable !== null);
+
+    console.log('형식화된 시간표:', JSON.stringify(formattedTimetables, null, 2));
+    res.json(formattedTimetables);
+  } catch (error) {
+    console.error('시간표 목록 조회 오류:', error);
+    res.status(500).json({ message: '서버 오류가 발생했습니다.', error: error.message });
+  }
+});
 
 
 // 전역 에러 핸들러
