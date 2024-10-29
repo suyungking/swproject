@@ -6,6 +6,7 @@ import MainPage from './components/MainPage';
 import TimeTableGenerator from './components/TimeTableGenerator';
 import InfoInputPage from './components/InfoInputPage';
 import InteractiveTimeTable from './components/InteractiveTimeTable';
+import SavedTimetables from './components/SavedTimetables';
 
 function App() {
   return (
@@ -17,6 +18,7 @@ function App() {
         <Route path="/timetable-generator" element={<TimeTableGenerator />} />
         <Route path="/info-input" element={<InfoInputPage />} />
         <Route path="/interactive-timetable" element={<InteractiveTimeTable />} />
+        <Route path="/saved-timetables" element={<SavedTimetables />} />
       </Routes>
     </Router>
   );
