@@ -79,11 +79,7 @@ export const login = async (email, password) => {
     }
 
     const data = await response.json();
-    console.log('Server response:', data);
-    if (!data.id && !data.userId) {
-      throw new Error('서버 응답에 id 또는 userId가 없습니다');
-    }
-    return { ...data, id: data.id || data.userId };
+    return data;
   } catch (error) {
     console.error('로그인 오류:', error);
     throw error;
@@ -164,4 +160,3 @@ export const loadTimetable = async (timetableId) => {
     throw error;
   }
 };
-
