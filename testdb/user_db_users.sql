@@ -34,15 +34,9 @@ CREATE TABLE `users` (
   `required_major` int DEFAULT NULL,
   `elective_major` int DEFAULT NULL,
   `graduation_credits` int DEFAULT NULL,
-  `completed_basic_literacy` int DEFAULT '0',
-  `completed_core_liberal_arts` int DEFAULT '0',
-  `completed_basic_science` int DEFAULT '0',
-  `completed_required_major` int DEFAULT '0',
-  `completed_elective_major` int DEFAULT '0',
-  `grade` int DEFAULT NULL,
   PRIMARY KEY (`id`),
   UNIQUE KEY `email` (`email`)
-) ENGINE=InnoDB AUTO_INCREMENT=4 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=5 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -51,7 +45,7 @@ CREATE TABLE `users` (
 
 LOCK TABLES `users` WRITE;
 /*!40000 ALTER TABLE `users` DISABLE KEYS */;
-INSERT INTO `users` VALUES (1,'최현서','deo4645@naver.com','$2b$10$MuuHfsvdi/NPcosJenZx/eO3DCbNPjwvcXNQ4/gZ4jyj.GHBs83hK','소프트웨어융합전공',7,12,12,28,56,130,0,0,0,0,0,NULL),(2,'최현서',NULL,NULL,'소프트웨어융합전공',7,12,12,18,66,130,0,0,0,0,0,NULL),(3,'최현서',NULL,NULL,'소프트웨어융합전공',7,12,12,18,66,130,0,0,0,0,0,NULL);
+INSERT INTO `users` VALUES (1,'최현서','deo4645@naver.com','$2b$10$MuuHfsvdi/NPcosJenZx/eO3DCbNPjwvcXNQ4/gZ4jyj.GHBs83hK','소프트웨어융합전공',7,12,12,28,56,130),(2,'최현서',NULL,NULL,'소프트웨어융합전공',7,12,12,18,66,130),(3,'최현서',NULL,NULL,'소프트웨어융합전공',7,12,12,18,66,130),(4,'홍길동','hong@naver.com','$2b$10$yQj2aQkuEGAqSyrH13fKPuwActgZUDzc1g3Y.e7x0kr5Z58qohpOi','소프트웨어융합전공',9,11,12,15,63,130);
 /*!40000 ALTER TABLE `users` ENABLE KEYS */;
 UNLOCK TABLES;
 /*!40103 SET TIME_ZONE=@OLD_TIME_ZONE */;
@@ -64,4 +58,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-10-25 22:18:53
+-- Dump completed on 2024-10-29 23:09:47

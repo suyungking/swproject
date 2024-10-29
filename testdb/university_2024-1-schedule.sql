@@ -36,8 +36,7 @@ CREATE TABLE `2024-1-schedule` (
   `최대수강학점
 제외여부` text,
   `이수구분` text,
-  `트랙이수
-구분` text,
+  `트랙이수` text,
   `트랙명` text,
   `학점` int DEFAULT NULL,
   `시수` int DEFAULT NULL,
@@ -71,4 +70,4 @@ UNLOCK TABLES;
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2024-10-25 22:18:54
+-- Dump completed on 2024-10-29 23:09:47
