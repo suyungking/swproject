@@ -156,8 +156,12 @@ def fetch_appropriate_liberal_arts(
     query = """
     SELECT 전공명, 학년, `주/야`, 과목명, 분반, 이수구분, 학점, 교수명, 시간표, 영역 
     FROM `2024-1-schedule` 
-    WHERE (이수구분 = '핵심교양' OR 이수구분 = '기초교양' OR (이수구분 = '소양교양' AND %s)) 
-    AND 영역 IN %s
+    WHERE (
+        (이수구분 = '핵심교양' AND 영역 IN %s) OR 
+        (이수구분 = '기초교양' AND 전공명 = '브라이트칼리지' AND (영역 = '기초문해교육' OR 영역 = '기초과학교육')) OR
+        (이수구분 = '소양교양' AND %s)
+    )
+    AND (학년 = '전학년' OR 학년 LIKE %s)
     """
     
     # 선호 요일에 따른 필터링
@@ -179,7 +183,7 @@ def fetch_appropriate_liberal_arts(
     if time_conditions:
         query += " AND " + " AND ".join(time_conditions)
     
-    params = [include_elective_liberal_arts, tuple(selected_areas)]
+    params = [tuple(selected_areas), include_elective_liberal_arts, '%1%']
     params.extend([f"%{day}%" for day in preferred_days])
     
     university_cursor.execute(query, tuple(params))
