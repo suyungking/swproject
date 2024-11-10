@@ -240,9 +240,14 @@ def calculate_course_priority(course, grade, remaining_credits, morning_afternoo
     # 학점에 따른 가중치
     priority += int(course['학점']) * 10
     
+    # 완화된 조건에 따른 우선순위 조정
+    if course['이수구분'] in ['기초교양', '핵심교양', '소양교양']:
+        priority += 50  # 교양 과목 우선순위 증가
+
     return priority
 
-def is_valid_course(course: Dict[str, Any], user_major: str) -> bool:
+# 수정된 함수: 과목의 유효성을 확인하는 함수에 제약 조건 완화 옵션 추가
+def is_valid_course(course: Dict[str, Any], user_major: str, relax_constraints: bool = False) -> bool:
     # 과목이 유효한지 확인하는 함수
     # 교양 과목은 항상 유효
     if course['이수구분'] in ['기초교양', '핵심교양', '소양교양']:
@@ -252,8 +257,15 @@ def is_valid_course(course: Dict[str, Any], user_major: str) -> bool:
     if course['전공명'] == user_major:
         return True
     
+    # 제약 조건 완화 시 추가적인 과목 허용
+    if relax_constraints:
+        # 여기에 추가적인 조건을 넣을 수 있습니다.
+        # 예: 다른 전공의 과목도 허용
+        return True
+    
     # 그 외의 경우는 유효하지 않음
     return False
+
 
 def resolve_schedule_conflicts(timetable, grade, remaining_credits, include_teacher_training, morning_afternoon, include_night, preferred_days):
     # 시간표 충돌을 해결하는 함수
@@ -403,6 +415,47 @@ def evaluate_timetable(timetable, total_credits, average_priority, preferred_day
                             score += 5
     
     return score
+
+# 새로 추가된 함수: 제약 조건을 완화하여 추가 과목을 탐색하는 함수
+def add_courses_with_relaxed_constraints(timetable, all_courses, max_credits, preferred_days, morning_afternoon, include_night, user_major):
+    total_credits = sum(int(course['학점']) for course in timetable if course['이수구분'] != '비교과')
+    
+    # 1. 요일 제한 완화
+    timetable, total_credits = relax_constraint(timetable, all_courses, max_credits, total_credits, preferred_days, morning_afternoon, include_night, user_major, relax_days=True)
+    
+    # 2. 시간대 제한 완화
+    if total_credits < max_credits:
+        timetable, total_credits = relax_constraint(timetable, all_courses, max_credits, total_credits, preferred_days, morning_afternoon, include_night, user_major, relax_time=True)
+    
+    # 3. 영역 및 소양과목 제한 완화
+    if total_credits < max_credits:
+        timetable, total_credits = relax_constraint(timetable, all_courses, max_credits, total_credits, preferred_days, morning_afternoon, include_night, user_major, relax_area=True)
+    
+    return timetable, total_credits
+
+# 새로 추가된 함수: 특정 제약 조건을 완화하여 과목을 추가하는 함수
+def relax_constraint(timetable, all_courses, max_credits, total_credits, preferred_days, morning_afternoon, include_night, user_major, relax_days=False, relax_time=False, relax_area=False):
+    logger.info(f"제한 완화 중: 요일={relax_days}, 시간={relax_time}, 영역={relax_area}")
+    
+    for course in all_courses:
+        if course not in timetable:
+            if is_valid_course(course, user_major, relax_constraints=relax_area):
+                if not is_time_conflict(timetable, course['시간표']):
+                    course_credits = int(course['학점'])
+                    if total_credits + course_credits <= max_credits:
+                        if relax_time or is_course_in_preferred_time(course, morning_afternoon, include_night):
+                            if relax_days or any(day in course['시간표'] for day in preferred_days):
+                                timetable.append(course)
+                                total_credits += course_credits
+                                logger.info(f"제한 완화로 추가된 과목: {course['과목명']} ({course['학점']}학점)")
+                                if total_credits >= max_credits:
+                                    return timetable, total_credits
+    
+    return timetable, total_credits
+
+
+
+
 
 def generate_initial_timetable(all_courses: List[Dict[str, Any]], grade: int, remaining_credits: Dict[str, Any], max_credits: int, preferred_days: List[str], morning_afternoon: str, include_night: bool, user_major: str) -> tuple:
     # 초기 시간표를 생성하는 함수
@@ -591,35 +644,14 @@ def generate_timetable(user_id, dynamic_data):
     final_timetable = best_timetable
     total_credits = sum(int(course['학점']) for course in final_timetable if course['이수구분'] != '비교과')
 
-     # 최대 학점에 도달하지 못한 경우 추가 과목 탐색 및 추가
+    # 최대 학점에 도달하지 못한 경우 제약 조건을 완화하여 추가 과목 탐색
     if total_credits < max_credits:
         logger.warning(f"최대 학점({max_credits})에 도달하지 못했습니다. 현재 총 학점: {total_credits}")
-        # 추가 가능한 과목 찾기
-        additional_courses = [
-            course for course in all_courses 
-            if course not in final_timetable 
-            and int(course['학점']) <= max_credits - total_credits
-            and not is_time_conflict(final_timetable, course)
-        ]
-        # 학점이 높은 순으로 정렬
-        additional_courses.sort(key=lambda x: int(x['학점']), reverse=True)
-        
-        # 추가 과목 탐색 및 추가
-        for course in additional_courses:
-            if total_credits + int(course['학점']) <= max_credits:
-                final_timetable.append(course)
-                total_credits += int(course['학점'])
-                logger.info(f"추가 과목 추가됨: {course['과목명']} ({course['학점']}학점)")
-                if total_credits == max_credits:
-                    break
-        
-        # 추가 과목 탐색 결과 로깅
-        if additional_courses and total_credits < max_credits:
-            logger.info(f"추가 가능한 과목이 있지만 최대 학점에 도달하지 못했습니다. 현재 총 학점: {total_credits}")
-        elif not additional_courses:
-            logger.info("추가 가능한 과목이 없습니다.")
+        final_timetable, total_credits = add_courses_with_relaxed_constraints(
+            final_timetable, all_courses, max_credits, preferred_days, morning_afternoon, include_night, user_data['major']
+        )
 
-    ## 대체 과목 찾기
+    # 대체 과목 찾기
     all_courses = fetch_all_courses()
     alternative_courses = {}
     for course in final_timetable:
